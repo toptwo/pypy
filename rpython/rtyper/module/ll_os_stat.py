@@ -14,6 +14,7 @@ from rpython.rtyper.lltypesystem.rtupletype import TUPLE_TYPE
 from rpython.rlib import rposix
 from rpython.rlib.rarithmetic import intmask
 from rpython.rlib.objectmodel import specialize
+from rpython.translator.platform import is_host_build
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 from rpython.rtyper.annlowlevel import hlstr
 
@@ -22,7 +23,9 @@ from rpython.rtyper.annlowlevel import hlstr
 #   sub-second timestamps.
 # - TIMESPEC is defined when the "struct stat" contains st_atim field.
 
-if sys.platform.startswith('linux') or sys.platform.startswith('openbsd'):
+if not is_host_build():
+    TIMESPEC = None
+elif sys.platform.startswith('linux') or sys.platform.startswith('openbsd'):
     TIMESPEC = platform.Struct('struct timespec',
                                [('tv_sec', rffi.TIME_T),
                                 ('tv_nsec', rffi.LONG)])
