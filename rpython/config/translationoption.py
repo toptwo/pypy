@@ -43,11 +43,13 @@ translation_optiondescription = OptionDescription(
                                 ]
                      }),
     ChoiceOption("backend", "Backend to use for code generation",
-                 ["c", "cli", "jvm"], default="c",
+                 ["c", "cli", "jvm", "js"], default="c",
                  requires={
                      "c":      [("translation.type_system", "lltype")],
                      "cli":    [("translation.type_system", "ootype")],
                      "jvm":    [("translation.type_system", "ootype")],
+                     "js":     [("translation.type_system", "lltype"),
+                                ("translation.platform", "emscripten")],
                      },
                  cmdline="-b --backend"),
 
@@ -282,6 +284,7 @@ translation_optiondescription = OptionDescription(
                                    ("translation.jit_backend", "arm")]},
                  requires={"emscripten": [
                             ("translation.gcrootfinder", "shadowstack"),
+                            ("translation.shared", False),
                            ]}
     ),
 

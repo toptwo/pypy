@@ -35,6 +35,7 @@ def taskdef(deps, title, new_state=None, expected_states=[],
 
 _BACKEND_TO_TYPESYSTEM = {
     'c': 'lltype',
+    'js': 'lltype',
 }
 
 def backend_to_typesystem(backend):
@@ -531,6 +532,16 @@ class TranslationDriver(SimpleTaskEngine):
             self.create_exe()
         else:
             self.c_entryp = cbuilder.get_entry_point()
+
+    # For now, the "JS" backend is actually just the C backend with
+    # compiler set to `emcc`.  It's neater to expose this as a fully
+    # separate backend.
+
+    task_database_js = task_database_c
+
+    task_source_js = task_source_c
+
+    task_compile_js = task_compile_c
 
     @taskdef([STACKCHECKINSERTION, '?'+BACKENDOPT, RTYPE], "LLInterpreting")
     def task_llinterpret_lltype(self):
