@@ -53,6 +53,11 @@ working_oo_modules.update(dict.fromkeys(
     ["_md5", "_sha", "cStringIO", "itertools"]
 ))
 
+working_js_modules = default_modules.copy()
+working_js_modules.update(dict.fromkeys(
+    ["_md5", "_sha", "cStringIO", "itertools", "time", "rctime"]
+))
+
 # XXX this should move somewhere else, maybe to platform ("is this posixish"
 #     check or something)
 if sys.platform == "win32":
@@ -353,6 +358,8 @@ def set_pypy_opt_level(config, level):
 def enable_allworkingmodules(config):
     if config.translation.type_system == 'ootype':
         modules = working_oo_modules
+    elif config.translation.backend == 'js':
+        modules = working_js_modules
     else:
         modules = working_modules
     if config.translation.sandbox:
