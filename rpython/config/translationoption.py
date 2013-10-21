@@ -39,10 +39,8 @@ translation_optiondescription = OptionDescription(
                  ["c", "js"], default="c",
                  requires={
                      "c":      [("translation.type_system", "lltype")],
-                     "js":     [("translation.type_system", "lltype")],
-                     },
-                 suggests={
-                     "js":     [("translation.platform", "emscripten")],
+                     "js":     [("translation.type_system", "lltype"),
+                                ("translation.platform", "emscripten")],
                      },
                  cmdline="-b --backend"),
 
@@ -260,12 +258,12 @@ translation_optiondescription = OptionDescription(
     ChoiceOption("platform",
                  "target platform", ['host'] + PLATFORMS, default='host',
                  cmdline='--platform',
-                 suggests={"arm": [("translation.gcrootfinder", "shadowstack"),
-                                   ("translation.jit_backend", "arm")],
-                           "emscripten": [
+                 requires={"emscripten": [
                              ("translation.gcrootfinder", "shadowstack"),
                              ("translation.shared", False),
                            ]},
+                 suggests={"arm": [("translation.gcrootfinder", "shadowstack"),
+                                   ("translation.jit_backend", "arm")]},
     ),
 
 ])
