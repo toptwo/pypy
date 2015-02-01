@@ -817,27 +817,56 @@ class CompiledBlockASMJS(object):
                     bldr.emit_store(excval, addr, js.Int32)
                     bldr.emit_store(js.zero, pos_exctyp, js.Int32)
                     bldr.emit_store(js.zero, pos_excval, js.Int32)
-            # Store the failargs into the frame.
-            # XXX TODO: they might already be there due to a call_may_force
-            bldr.emit_comment("SPILL %d FAILARGS" % (len(faillocs),))
+            # Call guard failure helper, creating code for it if necessary.
+            # The code is uniquely identified by failkinds.
+            # XXX TODO: this whole "helper func" thing needs a good refactor.
+            # XXX TODO: currently, helper funcs will never be freed.
+            helper_argtypes = ["i", "i"]
+            helper_args = [
+                js.ConstPtr(cast_instance_to_gcref(faildescr)),
+                js.ConstInt(self.cpu.cast_ptr_to_int(faildescr._asmjs_gcmap))
+            ]
             for i in xrange(len(failkinds)):
+                # XXX TODO: are we sure that faillocs[i] is a deterministic
+                # function of the failkinds list?
                 kind = failkinds[i]
                 if kind == HOLE:
                     continue
-                typ = js.HeapType.from_kind(kind)
-                val = failvars[i]
-                pos = faillocs[i]
-                bldr.emit_store(val, js.FrameSlotAddr(pos), typ)
-            self.emit_store_gcmap(bldr, faildescr._asmjs_gcmap)
-            # Write the faildescr into the frame.
-            descr = js.ConstPtr(cast_instance_to_gcref(faildescr))
-            bldr.emit_store(descr, js.FrameDescrAddr(), js.Int32)
-            # Bail back to the interpreter to deal with it.
+                helper_args.append(failvars[i])
+                if kind == FLOAT:
+                    helper_argtypes.append("d")
+                else:
+                    helper_argtypes.append("i")
+            helper_name = "guard_failure_" + "".join(helper_argtypes)
+            if not bldr.has_helper_func(helper_name):
+                with bldr.make_helper_func(helper_name, helper_argtypes) as hb:
+                    # Store the failargs into the frame.
+                    hb.emit_comment("SPILL %d FAILARGS" % (len(faillocs),))
+                    for i in xrange(len(failkinds)):
+                        kind = failkinds[i]
+                        if kind == HOLE:
+                            continue
+                        typ = js.HeapType.from_kind(kind)
+                        myvar = failvars[i]
+                        assert isinstance(myvar, js.Variable)
+                        if kind == FLOAT:
+                            var = myvar
+                        else:
+                            # +2 for descr adn gcmap input args
+                            var = hb.allocate_intvar(int(myvar.varname[1:])+2)
+                        pos = faillocs[i]
+                        hb.emit_store(var, js.FrameSlotAddr(pos), typ)
+                    # Write the gcmap from second input arg.
+                    self.emit_store_gcmapref(hb, hb.allocate_intvar(1))
+                    # Write the faildescr from first input arg.
+                    hb.emit_comment("STORE FAILDESCR")
+                    descr_var = hb.allocate_intvar(0)
+                    hb.emit_store(descr_var, js.FrameDescrAddr(), js.Int32)
+            bldr.emit_call_helper_func(helper_name, helper_args)
+            # Bail back to the interpreter to deal with the failure.
             bldr.emit_exit()
 
-    def emit_store_gcmap(self, bldr, gcmap, frame=None, writebarrier=True):
-        if frame is None:
-            frame = js.frame
+    def emit_store_gcmap(self, bldr, gcmap, writebarrier=True):
         # Store the appropriate gcmap on the frame.
         comment = "STORE GCMAP"
         if SANITYCHECK:
@@ -848,11 +877,16 @@ class CompiledBlockASMJS(object):
                     comment = comment + " %d" % (gcmap[i],)
         bldr.emit_comment(comment)
         gcmapref = js.ConstInt(self.cpu.cast_ptr_to_int(gcmap))
-        bldr.emit_store(gcmapref, js.FrameGCMapAddr(), js.Int32)
+        writebarrier = writebarrier and gcmap != jitframe.NULLGCMAP
+        self.emit_store_gcmapref(bldr, gcmapref, writebarrier)
+
+    def emit_store_gcmapref(self, bldr, val, writebarrier=True):
+        bldr.emit_store(val, js.FrameGCMapAddr(), js.Int32)
         # We might have just stored some young pointers into the frame.
         # Emit a write barrier just in case.
-        if writebarrier and gcmap != jitframe.NULLGCMAP:
-            self.emit_write_barrier(bldr, [frame])
+        if writebarrier:
+            with bldr.emit_if_block(val):
+                self.emit_write_barrier(bldr, [js.frame])
 
     def emit_write_barrier(self, bldr, arguments, wbdescr=None, array=False):
         # Decode and grab the necessary function pointer.

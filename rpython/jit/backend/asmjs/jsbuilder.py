@@ -27,6 +27,7 @@ class ASMJSBuilder(object):
         self.free_intvars = []
         self.free_doublevars = []
         self.imported_functions = {}
+        self.helper_functions = {}
 
     def finish(self):
         return "".join(self._build_prelude() +
@@ -53,6 +54,9 @@ class ASMJSBuilder(object):
         chunks.append('var jitInvoke = foreign._jitInvoke;\n')
         for funcname in self.imported_functions:
             chunks.append('var %s = foreign.%s;\n' % (funcname, funcname))
+        # Definitions for any helper functions.
+        for helper_chunks in self.helper_functions.itervalues():
+            chunks.extend(helper_chunks)
         # The function definition, including variable declarations.
         chunks.append('function F(frame, label){\n')
         chunks.append('frame=frame|0;\n')
@@ -327,6 +331,20 @@ class ASMJSBuilder(object):
         del self.source_chunks[:]
         return fragment
 
+    def has_helper_func(self, name):
+        return name in self.helper_functions
+
+    def make_helper_func(self, name, argtypes):
+        return ctx_make_helper_func(self, name, argtypes)
+
+    def emit_call_helper_func(self, name, args):
+        self.source_chunks.append(name)
+        self.source_chunks.append("(frame")
+        for i in xrange(len(args)):
+            self.source_chunks.append(",")
+            self.emit_value(args[i])
+        self.source_chunks.append(")|0;\n")  # alway returns frame
+
 
 class ctx_if_block(object):
 
@@ -441,3 +459,51 @@ class ctx_case_block(object):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.bldr.emit("break;\n}\n")
+
+
+class ctx_make_helper_func(object):
+
+    def __init__(self, bldr, name, argtypes):
+        self.bldr = bldr
+        self.name = name
+        self.argtypes = argtypes
+        self.helper_builder = ASMJSBuilder(self.bldr.cpu)
+        self.argvars = [None] * len(self.argtypes)
+        for i in xrange(len(self.argtypes)):
+            if self.argtypes[i] == "i":
+                self.argvars[i] = self.helper_builder.allocate_intvar()
+            else:
+                assert self.argtypes[i] == "d"
+                self.argvars[i] = self.helper_builder.allocate_doublevar()
+
+    def __enter__(self):
+        return self.helper_builder
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        chunks = []
+        chunks.append("function %s(frame" % (self.name,))
+        for i in xrange(len(self.argvars)):
+            chunks.append(",")
+            chunks.append(self.argvars[i].varname)
+        chunks.append("){\n")
+        chunks.append("frame = frame|0;\n")
+        for i in xrange(len(self.argtypes)):
+            chunks.append(self.argvars[i].varname)
+            chunks.append("=")
+            if self.argtypes[i] == "i":
+                chunks.append(self.argvars[i].varname)
+                chunks.append("|0;\n")
+            else:
+                chunks.append("+")
+                chunks.append(self.argvars[i].varname)
+                chunks.append(";\n")
+        for var in self.helper_builder.all_intvars:
+            if var not in self.argvars:
+                chunks.append("var %s=0;\n" % (var.varname,))
+        for var in self.helper_builder.all_doublevars:
+            if var not in self.argvars:
+                chunks.append("var %s=0.0;\n" % (var.varname,))
+        chunks.extend(self.helper_builder.source_chunks)
+        chunks.append("return frame|0;\n}\n")
+        self.bldr.helper_functions[self.name] = chunks
+        self.bldr.imported_functions.update(self.helper_builder.imported_functions)
