@@ -64,9 +64,10 @@ class EmscriptenPlatform(BasePosix):
       "-Os",
       "--llvm-lto", "3",
       "--llvm-opts", repr(["-Os"] + llvm_opts),
+      # Handy warnings if we happen to do unaligned stuff.
+      "-s", "WARN_UNALIGNED=1",
       # These are things that we've found to work OK with the generated code.
       # and give a good performance/code-size tradeoff.
-      "-s", "FORCE_ALIGNED_MEMORY=1",
       "-s", "FUNCTION_POINTER_ALIGNMENT=1",
       "-s", "ASSERTIONS=0",
       # This prevents llvm optimization from throwing stuff away.
@@ -165,7 +166,8 @@ class EmscriptenPlatform(BasePosix):
         # XXX TODO: also need to export jitInvoke, maybe some emjs_* helpers.
         idx = ldflags.index("EXPORT_ALL=1")
         del ldflags[idx - 1 : idx + 1]
-        exports = ("main", "free") + eci.export_symbols
+        exports = ("main", "free", "jitInvoke" "emjs_make_handle", "emjs_free")
+        exports = exports + eci.export_symbols
         exports = repr(["_" + nm for nm in exports])
         ldflags.extend([
             "-s", repr("EXPORTED_FUNCTIONS=%s" % (exports,)),
