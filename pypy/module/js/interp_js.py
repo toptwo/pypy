@@ -51,7 +51,7 @@ class W_Value(W_Root):
             n = support.emjs_read_strn(h_str, buf.raw, buf.size)
             return space.wrap(buf.str(n))
 
-    # We expose === as default equality operator, for that I hope
+    # We expose === as default equality operator, for what I hope
     # are fairly obvious reasons....
 
     def descr__eq__(self, space, w_other):
