@@ -2561,21 +2561,20 @@ class ctx_allow_gc(ctx_spill_to_frame):
             if self.block._is_final_use(box, self.block.pos):
                 continue
             live_refs[box] = True
-            if self.find_spill_location(box) >= 0:
-                self.genop_spill_to_frame(box)
+            loc = self.find_spill_location(box)
+            self.genop_spill_to_frame(box, loc)
         self.block._genop_store_gcmap()
         # If gc occurs, anything below spilled_frame_offset will no
         # longer be a valid pointer, unmark them as being spilled.
-        # Also null out any holes we may have left in the frame
+        # Also null out any refs in "holes" we may have left in the frame
         # when re-using previously-spilled values.
         for pos, box in self.block.spilled_frame_values.items():
             remove_it = False
             if pos >= self.block.spilled_frame_offset:
                 remove_it = True
-            elif box not in live_refs:
-                remove_it = True
-                addr = js.FrameSlotAddr(pos)
-                self.block.bldr.emit_store(js.ConstInt(0), addr, js.Int32)
+            elif isinstance(box, Box) and box.type == REF:
+                if box not in live_refs:
+                    remove_it = True
             if remove_it:
                 del self.block.spilled_frame_values[pos]
                 self.block.spilled_frame_locations[box].remove(pos)
