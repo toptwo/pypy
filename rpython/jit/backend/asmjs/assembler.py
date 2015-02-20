@@ -1285,12 +1285,7 @@ class CompiledBlockASMJS(object):
             for i in xrange(len(outputargs)):
                 box = outputargs[i]
                 offset = locations[i]
-                curval = self.spilled_frame_values.get(offset, None)
-                if curval is not None:
-                    if SANITYCHECK:
-                        assert curval == box
-                else:
-                    self._genop_spill_to_frame(box, offset)
+                self._genop_spill_to_frame(box, offset)
             self._genop_store_gcmap()
         return locations
 
@@ -1330,7 +1325,8 @@ class CompiledBlockASMJS(object):
             boxexpr = self._genop_flush_box(box)
         else:
             boxexpr = self._get_jsval(box)
-        self.bldr.emit_store(boxexpr, addr, typ)
+        if self.spilled_frame_values.get(offset, None) != boxexpr:
+            self.bldr.emit_store(boxexpr, addr, typ)
         # Record where we spilled it.
         if box not in self.spilled_frame_locations:
             self.spilled_frame_locations[box] = []
@@ -2458,6 +2454,10 @@ class CompiledBlockASMJS(object):
 
 class ctx_spill_to_frame(object):
 
+    # XXX TODO: other backends use a FrameManager for this,
+    # to minimise the number of redundant writes to the frame.
+    # We should do the same.
+
     def __init__(self, block):
         self.block = block
         self.orig_spilled_frame_offset = 0
@@ -2472,24 +2472,25 @@ class ctx_spill_to_frame(object):
         return self
 
     def __exit__(self, exc_typ, exc_val, exc_tb):
-        # Pop any items that were pushed in this context.
+        # Pop the spilled-items stack back to its previous value.
+        # We do not remove boxes from the spilled_values set, since it
+        # may be useful to re-use those for subsequent spills.  The
+        # ctx_allow_gc subclass will ensure they're clobbered if they
+        # become invalid.
         orig_offset = self.orig_spilled_frame_offset
         self.block.clt.func.ensure_frame_depth(self.block.spilled_frame_offset)
-        for pos, box in self.block.spilled_frame_values.items():
-            if pos >= orig_offset:
-                del self.block.spilled_frame_values[pos]
-                self.block.spilled_frame_locations[box].remove(pos)
-                if not self.block.spilled_frame_locations[box]:
-                    del self.block.spilled_frame_locations[box]
         self.block.spilled_frame_offset = orig_offset
 
-    def is_spilled(self, box):
+    def find_spill_location(self, box):
         try:
-            self.block.spilled_frame_locations[box]
+            locations = self.block.spilled_frame_locations[box]
         except KeyError:
-            return False
+            return -1
         else:
-            return True
+            for offset in locations:
+                if self.block.spilled_frame_values.get(offset, None) == box:
+                    return offset
+            return -1
 
     def genop_spill_to_frame(self, box, offset=-1):
         self.block._genop_spill_to_frame(box, offset)
@@ -2549,6 +2550,7 @@ class ctx_allow_gc(ctx_spill_to_frame):
         ctx_spill_to_frame.__enter__(self)
         bldr = self.block.bldr
         # Spill any active REF boxes into the frame.
+        live_refs = {}
         for box, jsval in self._get_live_boxes_in_spill_order():
             if not box or box.type != REF:
                 continue
@@ -2558,9 +2560,27 @@ class ctx_allow_gc(ctx_spill_to_frame):
                 continue
             if self.block._is_final_use(box, self.block.pos):
                 continue
-            if not self.is_spilled(box):
+            live_refs[box] = True
+            if self.find_spill_location(box) >= 0:
                 self.genop_spill_to_frame(box)
         self.block._genop_store_gcmap()
+        # If gc occurs, anything below spilled_frame_offset will no
+        # longer be a valid pointer, unmark them as being spilled.
+        # Also null out any holes we may have left in the frame
+        # when re-using previously-spilled values.
+        for pos, box in self.block.spilled_frame_values.items():
+            remove_it = False
+            if pos >= self.block.spilled_frame_offset:
+                remove_it = True
+            elif box not in live_refs:
+                remove_it = True
+                addr = js.FrameSlotAddr(pos)
+                self.block.bldr.emit_store(js.ConstInt(0), addr, js.Int32)
+            if remove_it:
+                del self.block.spilled_frame_values[pos]
+                self.block.spilled_frame_locations[box].remove(pos)
+                if not self.block.spilled_frame_locations[box]:
+                    del self.block.spilled_frame_locations[box]
         # Push the jitframe itself onto the gc shadowstack.
         # We do the following:
         #   * get a pointer to the pointer to the root-stack top.
