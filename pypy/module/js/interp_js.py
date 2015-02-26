@@ -112,7 +112,7 @@ class W_Value(W_Root):
             prop = space.int_w(w_prop)
             h_res = support.emjs_prop_get_int(self.handle, prop)
         else:
-            with _unwrap_handle(w_prop) as h_prop:
+            with _unwrap_handle(space, w_prop) as h_prop:
                 h_res = support.emjs_prop_get(self.handle, h_prop)
         return _wrap_handle(space, h_res)
 
@@ -128,7 +128,7 @@ class W_Value(W_Root):
                 prop = space.int_w(w_prop)
                 res = support.emjs_prop_set_int(self.handle, prop, h_value)
             else:
-                with _unwrap_handle(w_prop) as h_prop:
+                with _unwrap_handle(space, w_prop) as h_prop:
                     res = support.emjs_prop_set(self.handle, h_prop, h_value)
         _check_error(space, res)
 
@@ -143,7 +143,7 @@ class W_Value(W_Root):
             prop = space.int_w(w_prop)
             res = support.emjs_prop_delete_int(self.handle, prop)
         else:
-            with _unwrap_handle(w_prop) as h_prop:
+            with _unwrap_handle(space, w_prop) as h_prop:
                 res = support.emjs_prop_delete(self.handle, h_prop)
         _check_error(space, res)
 
