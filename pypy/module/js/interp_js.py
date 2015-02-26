@@ -88,6 +88,10 @@ class W_Value(W_Root):
         res = support.emjs_check(self.handle)
         return space.newbool(bool(res))
 
+    def descr__nonzero__(self, space):
+        res = support.emjs_check(self.handle)
+        return space.newbool(bool(res))
+
     # The semntics of __getitem__ and __getattr__ are equivalent for
     # javascript objects.  We use __getattr__ to provide python-friendly
     # conveniences:
@@ -229,6 +233,7 @@ W_Value.typedef = TypeDef(
     __repr__ = interp2app(W_Value.descr__repr__),
     __str__ = interp2app(W_Value.descr__str__),
     __bool__ = interp2app(W_Value.descr__bool__),
+    __nonzero__ = interp2app(W_Value.descr__nonzero__),
     __float__ = interp2app(W_Value.descr__float__),
     __int__ = interp2app(W_Value.descr__int__),
     __eq__ = interp2app(W_Value.descr__eq__),
