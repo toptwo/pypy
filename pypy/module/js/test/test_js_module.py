@@ -36,3 +36,22 @@ class AppTestJS(object):
         import js
         s = js.Object()
         assert str(s) == "[object Object]"
+
+    def test_js_truthiness(self):
+        import js
+        assert not js.null
+        assert not js.undefined
+        assert not js.false
+        assert not js.Number(0)
+        assert not js.String("")
+        assert js.true
+        assert js.Number(12)
+        assert js.String("xyz")
+
+    def test_js_array_access(self):
+        import js
+        a = js.eval("[1,2,3]")
+        assert a[0] == 1
+        assert a[1] == 2
+        assert a[2] == 3
+        assert a.length == len(a) == 3

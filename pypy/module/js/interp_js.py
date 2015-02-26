@@ -101,20 +101,50 @@ class W_Value(W_Root):
     #
     # This seems to give a good balance between js and python semantics.
 
-    @unwrap_spec(name=str)
-    def descr__getitem__(self, space, name):
-        h_res = support.emjs_prop_get_str(self.handle, name)
+    def descr__getitem__(self, space, w_prop):
+        if space.isinstance_w(w_prop, space.w_str):
+            prop = space.str_w(w_prop)
+            h_res = support.emjs_prop_get_str(self.handle, prop)
+        elif space.isinstance_w(w_prop, space.w_int):
+            prop = space.int_w(w_prop)
+            h_res = support.emjs_prop_get_int(self.handle, prop)
+        elif space.isinstance_w(w_prop, space.w_long):
+            prop = space.int_w(w_prop)
+            h_res = support.emjs_prop_get_int(self.handle, prop)
+        else:
+            with _unwrap_handle(w_prop) as h_prop:
+                h_res = support.emjs_prop_get(self.handle, h_prop)
         return _wrap_handle(space, h_res)
 
-    @unwrap_spec(name=str)
-    def descr__setitem__(self, space, name, w_value):
+    def descr__setitem__(self, space, w_prop, w_value):
         with _unwrap_handle(space, w_value) as h_value:
-            res = support.emjs_prop_set_str(self.handle, name, h_value)
+            if space.isinstance_w(w_prop, space.w_str):
+                prop = space.str_w(w_prop)
+                res = support.emjs_prop_set_str(self.handle, prop, h_value)
+            elif space.isinstance_w(w_prop, space.w_int):
+                prop = space.int_w(w_prop)
+                res = support.emjs_prop_set_int(self.handle, prop, h_value)
+            elif space.isinstance_w(w_prop, space.w_long):
+                prop = space.int_w(w_prop)
+                res = support.emjs_prop_set_int(self.handle, prop, h_value)
+            else:
+                with _unwrap_handle(w_prop) as h_prop:
+                    res = support.emjs_prop_set(self.handle, h_prop, h_value)
         _check_error(space, res)
 
-    @unwrap_spec(name=str)
-    def descr__delitem__(self, space, name):
-        res = support.emjs_prop_delete_str(self.handle, name)
+    def descr__delitem__(self, space, w_prop):
+        if space.isinstance_w(w_prop, space.w_str):
+            prop = space.str_w(w_prop)
+            res = support.emjs_prop_delete_str(self.handle, prop)
+        elif space.isinstance_w(w_prop, space.w_int):
+            prop = space.int_w(w_prop)
+            res = support.emjs_prop_delete_int(self.handle, prop)
+        elif space.isinstance_w(w_prop, space.w_long):
+            prop = space.int_w(w_prop)
+            res = support.emjs_prop_delete_int(self.handle, prop)
+        else:
+            with _unwrap_handle(w_prop) as h_prop:
+                res = support.emjs_prop_delete(self.handle, h_prop)
         _check_error(space, res)
 
     @unwrap_spec(name=str)
