@@ -64,7 +64,7 @@ class W_Value(W_Root):
         _check_error(space, bufsize)
         with rffi.scoped_alloc_buffer(bufsize) as buf:
             n = support.emjs_read_strn(h_str, buf.raw, buf.size)
-            return space.wrap(buf.str(n).decode("utf8"))
+            return space.wrap(buf.str(n).decode("utf-8"))
 
     # We expose === as default equality operator, for what I hope
     # are fairly obvious reasons....
@@ -432,7 +432,7 @@ def W_String_descr__new__(space, w_subtype, w_value):
     if space.isinstance_w(w_value, space.w_unicode):
         # XXX TODO: it would be awesome not to have to go via utf8.
         # Can we convert from raw in-memory repr direct to JS string?
-        value = space.unicode_w(w_value).encode("utf8")
+        value = space.unicode_w(w_value).encode("utf-8")
     else:
         value = space.str_w(w_value)
     h_value = support.emjs_make_strn(value, len(value))
@@ -771,7 +771,7 @@ def _convert(space, w_value):
     if space.isinstance_w(w_value, space.w_unicode):
         # XXX TODO: it would be awesome not to have to go via utf8.
         # Can we convert from raw in-memory repr direct to JS string?
-        value = space.unicode_w(w_value).encode("utf8")
+        value = space.unicode_w(w_value).encode("utf-8")
         return W_String(support.emjs_make_strn(value, len(value)))
     # XXX TODO: is this typecheck safe and accurate?
     if isinstance(w_value, pypy.interpreter.function.Function):
