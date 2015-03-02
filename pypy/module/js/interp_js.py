@@ -3,6 +3,7 @@ from __future__ import with_statement
 
 from rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.rlib import rweakref
+from rpython.rlib.objectmodel import we_are_translated
 
 import pypy.interpreter.function
 from pypy.interpreter.error import OperationError
@@ -27,7 +28,8 @@ class W_Value(W_Root):
         self.handle = handle
 
     def __del__(self):
-        support.emjs_free(self.handle)
+        if we_are_translated() or support and support.emjs_free:
+            support.emjs_free(self.handle)
 
     def descr__repr__(self, space):
         return space.wrap("<js.Value handle=%d>" % (self.handle,))
@@ -45,11 +47,24 @@ class W_Value(W_Root):
     def descr__str__(self, space):
         h_str = support.emjs_to_string(self.handle)
         _check_error(space, h_str)
-        bufsize = support.emjs_length(h_str)
+        # The buffer must hold utf8 version of the string, which
+        # might take up to four bytes per character.
+        bufsize = support.emjs_length(h_str) * 4
         _check_error(space, bufsize)
         with rffi.scoped_alloc_buffer(bufsize) as buf:
             n = support.emjs_read_strn(h_str, buf.raw, buf.size)
             return space.wrap(buf.str(n))
+
+    def descr__unicode__(self, space):
+        h_str = support.emjs_to_string(self.handle)
+        _check_error(space, h_str)
+        # The buffer must hold utf8 version of the string, which
+        # might take up to four bytes per character.
+        bufsize = support.emjs_length(h_str) * 4
+        _check_error(space, bufsize)
+        with rffi.scoped_alloc_buffer(bufsize) as buf:
+            n = support.emjs_read_strn(h_str, buf.raw, buf.size)
+            return space.wrap(buf.str(n).decode("utf8"))
 
     # We expose === as default equality operator, for what I hope
     # are fairly obvious reasons....
@@ -262,6 +277,7 @@ W_Value.typedef = TypeDef(
     __new__ = interp2app(W_Value_descr__new__),
     __repr__ = interp2app(W_Value.descr__repr__),
     __str__ = interp2app(W_Value.descr__str__),
+    __unicode__ = interp2app(W_Value.descr__unicode__),
     __bool__ = interp2app(W_Value.descr__bool__),
     __nonzero__ = interp2app(W_Value.descr__nonzero__),
     __float__ = interp2app(W_Value.descr__float__),
@@ -413,7 +429,12 @@ class W_String(W_Value):
 
 def W_String_descr__new__(space, w_subtype, w_value):
     w_self = space.allocate_instance(W_String, w_subtype)
-    value = space.str_w(w_value)
+    if space.isinstance_w(w_value, space.w_unicode):
+        # XXX TODO: it would be awesome not to have to go via utf8.
+        # Can we convert from raw in-memory repr direct to JS string?
+        value = space.unicode_w(w_value).encode("utf8")
+    else:
+        value = space.str_w(w_value)
     h_value = support.emjs_make_strn(value, len(value))
     W_String.__init__(space.interp_w(W_String, w_self), h_value)
     return w_self
@@ -734,7 +755,10 @@ class _unwrap_handle(object):
 def _convert(space, w_value):
     """Convert a wrapped value into a wrapped W_Value."""
     if space.is_w(w_value, space.w_None):
-        return undefined
+        return null
+    if space.isinstance_w(w_value, space.w_bool):
+        # This works because W_Bool is a subclass of W_Int.
+        return W_Boolean(support.emjs_make_bool(space.int_w(w_value)))
     if space.isinstance_w(w_value, space.w_int):
         return W_Number(support.emjs_make_int32(space.int_w(w_value)))
     if space.isinstance_w(w_value, space.w_long):
@@ -743,6 +767,11 @@ def _convert(space, w_value):
         return W_Number(support.emjs_make_double(space.float_w(w_value)))
     if space.isinstance_w(w_value, space.w_str):
         value = space.str_w(w_value)
+        return W_String(support.emjs_make_strn(value, len(value)))
+    if space.isinstance_w(w_value, space.w_unicode):
+        # XXX TODO: it would be awesome not to have to go via utf8.
+        # Can we convert from raw in-memory repr direct to JS string?
+        value = space.unicode_w(w_value).encode("utf8")
         return W_String(support.emjs_make_strn(value, len(value)))
     # XXX TODO: is this typecheck safe and accurate?
     if isinstance(w_value, pypy.interpreter.function.Function):

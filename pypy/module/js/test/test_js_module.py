@@ -17,11 +17,34 @@ class AppTestJS(object):
         "usemodules": ["js"]
     }
 
+    def test_py_to_js_conversion(self):
+        import js
+        assert isinstance(js.convert("hello"), js.String)
+        assert isinstance(js.convert(u"\u2603"), js.String)
+        assert isinstance(js.convert(42), js.Number)
+        assert isinstance(js.convert(42.5), js.Number)
+        assert isinstance(js.convert(True), js.Boolean)
+        assert isinstance(js.convert(False), js.Boolean)
+        assert isinstance(js.convert(None), js.Object)
+        def func():
+            pass
+        assert isinstance(js.convert(func), js.Function)
+        class cls():
+            def meth(self):
+                pass
+        assert isinstance(js.convert(cls.meth), js.Function)
+        assert isinstance(js.convert(cls().meth), js.Function)
+
+
     def test_js_string(self):
         import js
+        # Basic ASCII strings work as expected.
         s = js.String("hello world")
         assert str(s) == "hello world"
         assert len(s) == 11
+        # Unicode in, unicode out.
+        s = js.String(u"hello \u2603")
+        assert unicode(s) == u"hello \u2603"
 
     def test_js_number(self):
         import js
