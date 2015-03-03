@@ -2409,12 +2409,9 @@ class CompiledBlockASMJS(object):
         for pos, box in self.spilled_frame_values.iteritems():
             if box and box.type == REF:
                 gcmap = self.allocate_gcmap(self.spilled_frame_offset)
-                break
         # Set a bit for every REF that has been spilled.
         if gcmap != jitframe.NULLGCMAP:
             for pos, box in self.spilled_frame_values.iteritems():
-                if pos >= self.spilled_frame_offset:
-                    continue
                 if box and box.type == REF:
                     pos = pos // WORD
                     gcmap[pos // WORD // 8] |= r_uint(1) << (pos % (WORD * 8))
@@ -2577,8 +2574,7 @@ class ctx_allow_gc(ctx_spill_to_frame):
                 remove_it = True
             elif isinstance(box, Box) and box.type == REF:
                 if box not in live_refs:
-                    if pos >= self.orig_spilled_frame_offset:
-                        remove_it = True
+                    remove_it = True
             if remove_it:
                 del self.block.spilled_frame_values[pos]
                 self.block.spilled_frame_locations[box].remove(pos)
