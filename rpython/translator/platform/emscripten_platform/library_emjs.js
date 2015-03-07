@@ -58,20 +58,20 @@ var LibraryEMJS = {
   emjs_deref__deps: ['$EMJS'],
   emjs_deref: function(h) {
     h = h|0;
-    if (h > EMJS.MAX_STATIC_HANDLE && !EMJS.handles.hasOwnProperty(h)) {
-      throw new Error("invalid emjs_handle: " + h);
-    }
+    //if (h > EMJS.MAX_STATIC_HANDLE && !EMJS.handles.hasOwnProperty(h)) {
+    //  throw new Error("invalid emjs_handle: " + h);
+    //}
     return EMJS.handles[h];
   },
 
   emjs_free__deps: ['$EMJS'],
   emjs_free: function(h) {
     h = h|0;
-    if (h > EMJS.MAX_STATIC_HANDLE && !EMJS.handles.hasOwnProperty(h)) {
-      throw new Error("invalid emjs_handle: " + h);
-    }
+    //if (h > EMJS.MAX_STATIC_HANDLE && !EMJS.handles.hasOwnProperty(h)) {
+    //  throw new Error("invalid emjs_handle: " + h);
+    //}
     if (h > EMJS.MAX_STATIC_HANDLE) {
-      delete EMJS.handles[h];
+      EMJS.handles[h] = null;
       EMJS.free_handles.push(h);
     }
   },
