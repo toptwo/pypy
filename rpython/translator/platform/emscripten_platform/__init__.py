@@ -166,7 +166,7 @@ class EmscriptenPlatform(BasePosix):
         # XXX TODO: also need to export jitInvoke, maybe some emjs_* helpers.
         idx = ldflags.index("EXPORT_ALL=1")
         del ldflags[idx - 1 : idx + 1]
-        exports = ("main", "free", "jitInvoke" "emjs_make_handle", "emjs_free")
+        exports = ("main", "free", "jitInvoke", "emjs_make_handle", "emjs_free")
         exports = exports + eci.export_symbols
         exports = repr(["_" + nm for nm in exports])
         ldflags.extend([
