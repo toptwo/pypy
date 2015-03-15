@@ -73,13 +73,13 @@ class Module(MixedModule):
         'builtinify'                : 'interp_magic.builtinify',
         'lookup_special'            : 'interp_magic.lookup_special',
         'do_what_I_mean'            : 'interp_magic.do_what_I_mean',
-        'list_strategy'             : 'interp_magic.list_strategy',
         'validate_fd'               : 'interp_magic.validate_fd',
         'resizelist_hint'           : 'interp_magic.resizelist_hint',
         'newlist_hint'              : 'interp_magic.newlist_hint',
         'add_memory_pressure'       : 'interp_magic.add_memory_pressure',
         'newdict'                   : 'interp_dict.newdict',
-        'dictstrategy'              : 'interp_dict.dictstrategy',
+        'reversed_dict'             : 'interp_dict.reversed_dict',
+        'strategy'                  : 'interp_magic.strategy',  # dict,set,list
         'set_debug'                 : 'interp_magic.set_debug',
         'locals_to_fast'            : 'interp_magic.locals_to_fast',
     }

@@ -17,7 +17,8 @@ except ImportError:
 
 from rpython.flowspace.model import FunctionGraph, Block, Link
 from rpython.flowspace.model import SpaceOperation, Variable, Constant
-from rpython.rtyper.lltypesystem import lltype, llmemory, rclass, rstr, rffi
+from rpython.rtyper.lltypesystem import lltype, llmemory, rstr, rffi
+from rpython.rtyper import rclass
 from rpython.rtyper.lltypesystem.module import ll_math
 from rpython.translator.unsimplify import varoftype
 from rpython.jit.codewriter import heaptracker, effectinfo
@@ -147,6 +148,7 @@ class FakeBuiltinCallControl:
              EI.OS_UNIEQ_LENGTHOK:       ([PUNICODE, PUNICODE], INT),
              EI.OS_RAW_MALLOC_VARSIZE_CHAR: ([INT], ARRAYPTR),
              EI.OS_RAW_FREE:             ([ARRAYPTR], lltype.Void),
+             EI.OS_THREADLOCALREF_GET:   ([INT], INT),   # for example
             }
             argtypes = argtypes[oopspecindex]
             assert argtypes[0] == [v.concretetype for v in op.args[1:]]
@@ -157,6 +159,8 @@ class FakeBuiltinCallControl:
                 assert extraeffect == EI.EF_CAN_RAISE
             elif oopspecindex == EI.OS_RAW_FREE:
                 assert extraeffect == EI.EF_CANNOT_RAISE
+            elif oopspecindex == EI.OS_THREADLOCALREF_GET:
+                assert extraeffect == self.expected_effect_of_threadlocalref_get
             else:
                 assert extraeffect == EI.EF_ELIDABLE_CANNOT_RAISE
         return 'calldescr-%d' % oopspecindex
@@ -521,6 +525,35 @@ def test_malloc_new():
     op1 = Transformer(FakeCPU()).rewrite_operation(op)
     assert op1.opname == 'new'
     assert op1.args == [('sizedescr', S)]
+
+def test_malloc_new_zero_2():
+    S = lltype.GcStruct('S', ('x', lltype.Signed))
+    v = varoftype(lltype.Ptr(S))
+    op = SpaceOperation('malloc', [Constant(S, lltype.Void),
+                                   Constant({'flavor': 'gc',
+                                             'zero': True}, lltype.Void)], v)
+    op1, op2 = Transformer(FakeCPU()).rewrite_operation(op)
+    assert op1.opname == 'new'
+    assert op1.args == [('sizedescr', S)]
+    assert op2.opname == 'setfield_gc_i'
+    assert op2.args[0] == v
+
+def test_malloc_new_zero_nested():
+    S0 = lltype.GcStruct('S0')
+    S = lltype.Struct('S', ('x', lltype.Ptr(S0)))
+    S2 = lltype.GcStruct('S2', ('parent', S),
+                         ('xx', lltype.Ptr(S0)))
+    v = varoftype(lltype.Ptr(S2))
+    op = SpaceOperation('malloc', [Constant(S2, lltype.Void),
+                                   Constant({'flavor': 'gc',
+                                             'zero': True}, lltype.Void)], v)
+    op1, op2, op3 = Transformer(FakeCPU()).rewrite_operation(op)
+    assert op1.opname == 'new'
+    assert op1.args == [('sizedescr', S2)]
+    assert op2.opname == 'setfield_gc_r'
+    assert op2.args[0] == v
+    assert op3.opname == 'setfield_gc_r'
+    assert op3.args[0] == v
 
 def test_malloc_new_with_vtable():
     vtable = lltype.malloc(rclass.OBJECT_VTABLE, immortal=True)
@@ -1019,6 +1052,15 @@ def test_str_newstr():
     assert op1.args == [v1]
     assert op1.result == v2
 
+def test_malloc_varsize_zero():
+    c_A = Constant(lltype.GcArray(lltype.Signed), lltype.Void)
+    v1 = varoftype(lltype.Signed)
+    v2 = varoftype(c_A.value)
+    c_flags = Constant({"flavor": "gc", "zero": True}, lltype.Void)
+    op = SpaceOperation('malloc_varsize', [c_A, c_flags, v1], v2)
+    op1 = Transformer(FakeCPU()).rewrite_operation(op)
+    assert op1.opname == 'new_array_clear'
+
 def test_str_concat():
     # test that the oopspec is present and correctly transformed
     PSTR = lltype.Ptr(rstr.STR)
@@ -1251,7 +1293,7 @@ def test_quasi_immutable():
         assert op1.args[1] == ('fielddescr', STRUCT, 'inst_x')
         assert op1.args[2] == ('fielddescr', STRUCT, 'mutate_x')
         assert op1.result is None
-        assert op2.opname == 'getfield_gc_i'
+        assert op2.opname == 'getfield_gc_i_pure'
         assert len(op2.args) == 2
         assert op2.args[0] == v_x
         assert op2.args[1] == ('fielddescr', STRUCT, 'inst_x')
@@ -1300,6 +1342,33 @@ def test_cast_opaque_ptr():
     assert op1.result is None
     assert op2 is None
 
+def _test_threadlocalref_get(loop_inv):
+    from rpython.rlib.rthread import ThreadLocalField
+    tlfield = ThreadLocalField(lltype.Signed, 'foobar_test_',
+                               loop_invariant=loop_inv)
+    OS_THREADLOCALREF_GET = effectinfo.EffectInfo.OS_THREADLOCALREF_GET
+    c = const(tlfield.offset)
+    v = varoftype(lltype.Signed)
+    op = SpaceOperation('threadlocalref_get', [c], v)
+    cc = FakeBuiltinCallControl()
+    cc.expected_effect_of_threadlocalref_get = (
+        effectinfo.EffectInfo.EF_LOOPINVARIANT if loop_inv
+        else effectinfo.EffectInfo.EF_CANNOT_RAISE)
+    tr = Transformer(FakeCPU(), cc)
+    op0 = tr.rewrite_operation(op)
+    assert op0.opname == 'residual_call_ir_i'
+    assert op0.args[0].value == 'threadlocalref_get' # pseudo-function as str
+    assert op0.args[1] == ListOfKind("int", [c])
+    assert op0.args[2] == ListOfKind("ref", [])
+    assert op0.args[3] == 'calldescr-%d' % OS_THREADLOCALREF_GET
+    assert op0.result == v
+
+def test_threadlocalref_get_no_loop_inv():
+    _test_threadlocalref_get(loop_inv=False)
+
+def test_threadlocalref_get_with_loop_inv():
+    _test_threadlocalref_get(loop_inv=True)
+
 def test_unknown_operation():
     op = SpaceOperation('foobar', [], varoftype(lltype.Void))
     tr = Transformer()
@@ -1307,3 +1376,12 @@ def test_unknown_operation():
         tr.rewrite_operation(op)
     except Exception, e:
         assert 'foobar' in str(e)
+
+def test_likely_unlikely():
+    v1 = varoftype(lltype.Bool)
+    v2 = varoftype(lltype.Bool)
+    op = SpaceOperation('likely', [v1], v2)
+    tr = Transformer()
+    assert tr.rewrite_operation(op) is None
+    op = SpaceOperation('unlikely', [v1], v2)
+    assert tr.rewrite_operation(op) is None

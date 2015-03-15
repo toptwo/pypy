@@ -7,12 +7,11 @@ Global Interpreter Lock.
 # all but one will be blocked.  The other threads get a chance to run
 # from time to time, using the periodic action GILReleaseAction.
 
-from rpython.rlib import rthread
+from rpython.rlib import rthread, rgil
 from pypy.module.thread.error import wrap_thread_error
 from pypy.interpreter.executioncontext import PeriodicAsyncAction
 from pypy.module.thread.threadlocals import OSThreadLocals
 from rpython.rlib.objectmodel import invoke_around_extcall
-from rpython.rlib.rposix import get_errno, set_errno
 
 class GILThreadLocals(OSThreadLocals):
     """A version of OSThreadLocals that enforces a GIL."""
@@ -25,8 +24,7 @@ class GILThreadLocals(OSThreadLocals):
                                                   use_bytecode_counter=True)
 
     def _initialize_gil(self, space):
-        if not rthread.gil_allocate():
-            raise wrap_thread_error(space, "can't allocate GIL")
+        rgil.gil_allocate()
 
     def setup_threads(self, space):
         """Enable threads in the object space, if they haven't already been."""
@@ -66,23 +64,17 @@ class GILReleaseAction(PeriodicAsyncAction):
 
 after_thread_switch = lambda: None     # hook for signal.py
 
-# Fragile code below.  We have to preserve the C-level errno manually...
-
 def before_external_call():
     # this function must not raise, in such a way that the exception
     # transformer knows that it cannot raise!
-    e = get_errno()
-    rthread.gil_release()
-    set_errno(e)
+    rgil.gil_release()
 before_external_call._gctransformer_hint_cannot_collect_ = True
 before_external_call._dont_reach_me_in_del_ = True
 
 def after_external_call():
-    e = get_errno()
-    rthread.gil_acquire()
+    rgil.gil_acquire()
     rthread.gc_thread_run()
     after_thread_switch()
-    set_errno(e)
 after_external_call._gctransformer_hint_cannot_collect_ = True
 after_external_call._dont_reach_me_in_del_ = True
 
@@ -97,7 +89,7 @@ def do_yield_thread():
     # explicitly release the gil, in a way that tries to give more
     # priority to other threads (as opposed to continuing to run in
     # the same thread).
-    if rthread.gil_yield_thread():
+    if rgil.gil_yield_thread():
         rthread.gc_thread_run()
         after_thread_switch()
 do_yield_thread._gctransformer_hint_close_stack_ = True

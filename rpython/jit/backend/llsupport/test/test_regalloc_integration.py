@@ -12,7 +12,8 @@ from rpython.jit.backend.llsupport.regalloc import is_comparison_or_ovf_op
 from rpython.jit.tool.oparser import parse
 from rpython.rtyper.lltypesystem import lltype, llmemory, rffi
 from rpython.rtyper.annlowlevel import llhelper
-from rpython.rtyper.lltypesystem import rclass, rstr
+from rpython.rtyper.lltypesystem import rstr
+from rpython.rtyper import rclass
 from rpython.jit.codewriter import longlong
 from rpython.jit.codewriter.effectinfo import EffectInfo
 
@@ -116,10 +117,7 @@ class BaseTestRegalloc(object):
 
     def prepare_loop(self, ops):
         loop = self.parse(ops)
-        try:
-            regalloc = self.cpu.build_regalloc()
-        except AttributeError:
-            return None
+        regalloc = self.cpu.build_regalloc()
         regalloc.prepare_loop(loop.inputargs, loop.operations,
                               loop.original_jitcell_token, [])
         return regalloc
@@ -407,10 +405,9 @@ class TestRegallocSimple(BaseTestRegalloc):
         jump(i4, i1, i2, i3)
         """
         regalloc = self.prepare_loop(ops)
-        if regalloc is not None:
-            # we pass stuff on the frame
-            assert len(regalloc.rm.reg_bindings) == 0
-            assert len(regalloc.fm.bindings) == 4
+        # we pass stuff on the frame
+        assert len(regalloc.rm.reg_bindings) == 0
+        assert len(regalloc.fm.bindings) == 4
 
 
 class TestRegallocCompOps(BaseTestRegalloc):

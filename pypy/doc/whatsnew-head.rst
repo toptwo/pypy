@@ -1,8 +1,7 @@
 =======================
-What's new in PyPy 2.4+
+What's new in PyPy 2.5+
 =======================
 
-.. this is a revision shortly after release-2.3.x
-.. startrev: 87fdc76bccb4
-
+.. this is a revision shortly after release-2.5.x
+.. startrev: 397b96217b85
 

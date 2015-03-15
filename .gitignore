@@ -19,7 +19,3 @@ pypy/translator/c/src/dtoa.o
 pypy/translator/goal/pypy-c
 pypy/translator/goal/target*-c
 release/
-rpython/_cache
-include/numpy
-pypy-c
-pypy-js

@@ -523,6 +523,8 @@ class FunctionGcRootTracker(object):
         'movnt', 'mfence', 'lfence', 'sfence',
         # bit manipulations
         'andn', 'bextr', 'blsi', 'blsmask', 'blsr', 'tzcnt', 'lzcnt',
+        # uh, this can occur with a 'call' on the following line...
+        'rex64',
     ])
 
     # a partial list is hopefully good enough for now; it's all to support
@@ -585,13 +587,6 @@ class FunctionGcRootTracker(object):
             raise UnrecognizedOperation(line)
         else:
             return []
-
-    # The various cmov* operations
-    for name in '''
-        e ne g ge l le a ae b be p np s ns o no
-        '''.split():
-        locals()['visit_cmov' + name] = binary_insn
-        locals()['visit_cmov' + name + 'l'] = binary_insn
 
     def _visit_and(self, line):
         match = self.r_binaryinsn.match(line)
@@ -826,22 +821,18 @@ class FunctionGcRootTracker(object):
         return prefix + [InsnCondJump(label)] + postfix
 
     visit_jmpl = visit_jmp
-    visit_jg = conditional_jump
-    visit_jge = conditional_jump
-    visit_jl = conditional_jump
-    visit_jle = conditional_jump
-    visit_ja = conditional_jump
-    visit_jae = conditional_jump
-    visit_jb = conditional_jump
-    visit_jbe = conditional_jump
-    visit_jp = conditional_jump
-    visit_jnp = conditional_jump
-    visit_js = conditional_jump
-    visit_jns = conditional_jump
-    visit_jo = conditional_jump
-    visit_jno = conditional_jump
-    visit_jc = conditional_jump
-    visit_jnc = conditional_jump
+
+    # The various conditional jumps and cmov* operations
+    for name in '''
+        e g ge l le a ae b be p s o c
+        '''.split():
+        # NB. visit_je() and visit_jne() are overridden below
+        locals()['visit_j' + name] = conditional_jump
+        locals()['visit_jn' + name] = conditional_jump
+        locals()['visit_cmov' + name] = binary_insn
+        locals()['visit_cmov' + name + 'l'] = binary_insn
+        locals()['visit_cmovn' + name] = binary_insn
+        locals()['visit_cmovn' + name + 'l'] = binary_insn
 
     def visit_je(self, line):
         return self.conditional_jump(line, je=True)
@@ -858,12 +849,16 @@ class FunctionGcRootTracker(object):
         return []
 
     def _visit_xchg(self, line):
-        # only support the format used in VALGRIND_DISCARD_TRANSLATIONS
+        # support the format used in VALGRIND_DISCARD_TRANSLATIONS
         # which is to use a marker no-op "xchgl %ebx, %ebx"
         match = self.r_binaryinsn.match(line)
         source = match.group("source")
         target = match.group("target")
         if source == target:
+            return []
+        # ignore the 'rpy_fastgil' atomic exchange, or any locked
+        # atomic exchange at all (involving memory)
+        if not source.startswith('%'):
             return []
         raise UnrecognizedOperation(line)
 
@@ -1519,6 +1514,9 @@ class ElfAssemblerParser(AssemblerParser):
                 yield True, functionlines
                 in_function = False
                 functionlines = []
+        if in_function and ".get_pc_thunk.bx" in functionlines[0]:
+            in_function = False     # xxx? ignore this rare unclosed stub at
+                                    # the end of the file
         assert not in_function, (
             "missed the end of the previous function")
         yield False, functionlines

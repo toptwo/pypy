@@ -22,6 +22,12 @@ else:
 
 IS_64_BITS = sys.maxint > 2147483647
 
+SUPPORT__THREAD = (    # whether the particular C compiler supports __thread
+    sys.platform.startswith("linux"))     # Linux works
+    # OS/X doesn't work, because we still target 10.5/10.6 and the
+    # minimum required version is 10.7.  Windows doesn't work.  Please
+    # add other platforms here if it works on them.
+
 MAINDIR = os.path.dirname(os.path.dirname(__file__))
 CACHE_DIR = os.path.realpath(os.path.join(MAINDIR, '_cache'))
 
@@ -30,7 +36,6 @@ PLATFORMS = [
     'host',
     'distutils',
     'arm',
-    'emscripten',
 ]
 
 translation_optiondescription = OptionDescription(
@@ -41,11 +46,9 @@ translation_optiondescription = OptionDescription(
     ChoiceOption("type_system", "Type system to use when RTyping",
                  ["lltype"], cmdline=None, default="lltype"),
     ChoiceOption("backend", "Backend to use for code generation",
-                 ["c", "js"], default="c",
+                 ["c"], default="c",
                  requires={
                      "c":      [("translation.type_system", "lltype")],
-                     "js":     [("translation.type_system", "lltype"),
-                                ("translation.platform", "emscripten")],
                      },
                  cmdline="-b --backend"),
 
@@ -94,10 +97,8 @@ translation_optiondescription = OptionDescription(
                  cmdline="--gcrootfinder",
                  requires={
                      "shadowstack": [("translation.gctransformer", "framework")],
-                     "asmgcc": [("translation.gctransformer", "framework")],
-                    },
-                 suggests={
-                     "asmgcc": [("translation.backend", "c")],
+                     "asmgcc": [("translation.gctransformer", "framework"),
+                                ("translation.backend", "c")],
                     }),
 
     # other noticeable options
@@ -128,7 +129,8 @@ translation_optiondescription = OptionDescription(
                default=False, cmdline=None),
 
     # misc
-    BoolOption("verbose", "Print extra information", default=False),
+    BoolOption("verbose", "Print extra information", default=False,
+               cmdline="--verbose"),
     StrOption("cc", "Specify compiler to use for compiling generated C", cmdline="--cc"),
     StrOption("profopt", "Specify profile based optimization script",
               cmdline="--profopt"),
@@ -161,7 +163,8 @@ translation_optiondescription = OptionDescription(
     # portability options
     BoolOption("no__thread",
                "don't use __thread for implementing TLS",
-               default=False, cmdline="--no__thread", negation=False),
+               default=not SUPPORT__THREAD, cmdline="--no__thread",
+               negation=False),
     IntOption("make_jobs", "Specify -j argument to make for compilation"
               " (C backend only)",
               cmdline="--make-jobs", default=detect_number_of_processors()),
@@ -267,13 +270,8 @@ translation_optiondescription = OptionDescription(
     ChoiceOption("platform",
                  "target platform", ['host'] + PLATFORMS, default='host',
                  cmdline='--platform',
-                 requires={"emscripten": [
-                             ("translation.gcrootfinder", "shadowstack"),
-                             ("translation.shared", False),
-                           ]},
                  suggests={"arm": [("translation.gcrootfinder", "shadowstack"),
-                                   ("translation.jit_backend", "arm")]},
-    ),
+                                   ("translation.jit_backend", "arm")]}),
 
 ])
 
@@ -379,8 +377,8 @@ def set_opt_level(config, level):
 
     # disallow asmgcc on OS/X and on Win32
     if config.translation.gcrootfinder == "asmgcc":
-        assert sys.platform != "darwin", "'asmgcc' not supported on OS/X"
-        assert sys.platform != "win32",  "'asmgcc' not supported on Win32"
+        if sys.platform == "darwin" or sys.platform =="win32":
+            raise ConfigError("'asmgcc' not supported on this platform")
 
 # ----------------------------------------------------------------
 

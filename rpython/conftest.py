@@ -1,10 +1,8 @@
-from os.path import *
 import py, pytest
 from rpython.tool import leakfinder
 
 pytest_plugins = 'rpython.tool.pytest.expecttest'
 
-cdir = realpath(join(dirname(__file__), 'translator', 'c'))
 option = None
 
 def braindead_deindent(self):
@@ -55,7 +53,7 @@ def pytest_pycollect_makeitem(__multicall__,collector, name, obj):
 
 
 def pytest_addhooks(pluginmanager):
-    pass #pluginmanager.register(LeakFinder())
+    pluginmanager.register(LeakFinder())
 
 class LeakFinder:
     """Track memory allocations during test execution.

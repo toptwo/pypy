@@ -2,6 +2,7 @@
 """ Tests for register allocation for common constructs
 """
 
+import py
 import re
 from rpython.jit.metainterp.history import TargetToken, BasicFinalDescr,\
      JitCellToken, BasicFailDescr, AbstractDescr
@@ -89,8 +90,6 @@ class TestRegallocGcIntegration(BaseTestRegalloc):
                 assert nos ==  [0, 1, 25]
         elif self.cpu.backend_name.startswith('arm'):
             assert nos == [0, 1, 47]
-        elif self.cpu.backend_name.startswith('asmjs'):
-            assert nos == [0, 2, 3]
         else:
             raise Exception("write the data here")
         assert frame.jf_frame[nos[0]]
@@ -248,7 +247,7 @@ class TestMallocFastpath(BaseTestRegalloc):
         p0 = call_malloc_nursery_varsize_frame(i0)
         p1 = call_malloc_nursery_varsize_frame(i1)
         p2 = call_malloc_nursery_varsize_frame(i2)
-        guard_false(i0) [p0, p1, p2]
+        guard_true(i0) [p0, p1, p2]
         '''
         self.interpret(ops, [16, 32, 16])
         # check the returned pointers
@@ -327,9 +326,7 @@ class TestMallocFastpath(BaseTestRegalloc):
                 assert frame.jf_gcmap[idx] == (1<<29) | (1 << 30)
             else:
                 assert frame.jf_gcmap[idx]
-                exp_idx = self.cpu.JITFRAME_FIXED_SIZE - 32 * idx
-                if not self.cpu.backend_name.startswith('asmjs'):
-                    exp_idx += 1 # +1 from i0
+                exp_idx = self.cpu.JITFRAME_FIXED_SIZE - 32 * idx + 1 # +1 from i0
                 assert frame.jf_gcmap[idx] == (1 << (exp_idx + 1)) | (1 << exp_idx)
 
         self.cpu = self.getcpu(check)
@@ -357,10 +354,7 @@ class TestMallocFastpath(BaseTestRegalloc):
     def test_save_regs_around_malloc(self):
         def check(frame):
             x = frame.jf_gcmap
-            if self.cpu.backend_name.startswith('asmjs'):
-                assert len(x) == 1
-                assert bin(x[0]).count('1') == 16
-            elif self.cpu.IS_64_BIT:
+            if self.cpu.IS_64_BIT:
                 assert len(x) == 1
                 assert (bin(x[0]).count('1') ==
                         '0b1111100000000000000001111111011110'.count('1'))
@@ -467,7 +461,7 @@ class WriteBarrierDescr(AbstractDescr):
     def get_write_barrier_fn(self, cpu):
         return self.write_barrier_fn
 
-# a copy of JITFRAME that has 'hdr' field for tests
+# a copy of JITFRAM that has 'hdr' field for tests
 
 def jitframe_allocate(frame_info):
     frame = lltype.malloc(JITFRAME, frame_info.jfi_frame_depth, zero=True)
@@ -647,8 +641,6 @@ class TestGcShadowstackDirect(BaseTestRegalloc):
             elif self.cpu.backend_name.startswith('arm'):
                 assert gcmap == [44, 45, 46]
                 pass
-            elif self.cpu.backend_name.startswith('asmjs'):
-                assert gcmap == [0, 1, 2]
             else:
                 assert gcmap == [22, 23, 24]
             for item, s in zip(gcmap, new_items):
@@ -695,7 +687,7 @@ class TestGcShadowstackDirect(BaseTestRegalloc):
         frame = lltype.cast_opaque_ptr(JITFRAMEPTR, frame)
         gcmap = unpack_gcmap(lltype.cast_opaque_ptr(JITFRAMEPTR, frame))
         assert len(gcmap) == 1
-        assert gcmap[0] <= self.cpu.JITFRAME_FIXED_SIZE
+        assert gcmap[0] < self.cpu.JITFRAME_FIXED_SIZE
         item = rffi.cast(lltype.Ptr(S), frame.jf_frame[gcmap[0]])
         assert item == new_items[2]
 
@@ -789,6 +781,9 @@ class TestGcShadowstackDirect(BaseTestRegalloc):
         assert rffi.cast(JITFRAMEPTR, cpu.gc_ll_descr.write_barrier_on_frame_called) == frame
 
     def test_call_release_gil(self):
+        py.test.skip("xxx fix this test: the code is now assuming that "
+                     "'before' is just rgil.release_gil(), and 'after' is "
+                     "only needed if 'rpy_fastgil' was not changed.")
         # note that we can't test floats here because when untranslated
         # people actually wreck xmm registers
         cpu = self.cpu
@@ -797,21 +792,17 @@ class TestGcShadowstackDirect(BaseTestRegalloc):
 
         def before():
             # put nonsense on the top of shadowstack
-            rootstack = cpu.gc_ll_descr.gcrootmap.stack
-            try:
-                frame = rffi.cast(JITFRAMEPTR, rootstack[0])
-            except IndexError:
-                pass
-            else:
-                assert getmap(frame).count('1') == 7 #
-                copied_stack[0] = rootstack[0]
-                rootstack[0] = -42
+            frame = rffi.cast(JITFRAMEPTR, cpu.gc_ll_descr.gcrootmap.stack[0])
+            assert getmap(frame).count('1') == 7 #
+            copied_stack[0] = cpu.gc_ll_descr.gcrootmap.stack[0]
+            cpu.gc_ll_descr.gcrootmap.stack[0] = -42
             l.append("before")
 
         def after():
-            if copied_stack[0] is not None:
-                cpu.gc_ll_descr.gcrootmap.stack[0] = copied_stack[0]
+            cpu.gc_ll_descr.gcrootmap.stack[0] = copied_stack[0]
             l.append("after")
+
+        invoke_around_extcall(before, after)
 
         def f(frame, x):
             # all the gc pointers are alive p1 -> p7 (but not p0)
@@ -835,12 +826,10 @@ class TestGcShadowstackDirect(BaseTestRegalloc):
         cpu.gc_ll_descr.init_nursery(100)
         cpu.setup_once()
         cpu.compile_loop(loop.inputargs, loop.operations, token)
-        invoke_around_extcall(before, after)
         args = [lltype.nullptr(llmemory.GCREF.TO) for i in range(7)]
         frame = cpu.execute_token(token, 1, *args)
         frame = rffi.cast(JITFRAMEPTR, frame)
         assert frame.jf_frame[0] == 2
-        assert copied_stack[0] is not None
         assert l == ['before', 'after']
 
     def test_call_may_force_gcmap(self):
@@ -848,8 +837,7 @@ class TestGcShadowstackDirect(BaseTestRegalloc):
 
         def f(frame, arg, x):
             assert not arg
-            if self.cpu.backend_name != 'asmjs':
-                assert frame.jf_gcmap[0] & 31 == 0
+            assert frame.jf_gcmap[0] & 31 == 0
             assert getmap(frame).count('1') == 3 # p1, p2, p3, but
             # not in registers
             frame.jf_descr = frame.jf_force_descr # make guard_not_forced fail
@@ -894,8 +882,7 @@ class TestGcShadowstackDirect(BaseTestRegalloc):
 
         def f(frame, arg, x):
             assert not arg
-            if self.cpu.backend_name != 'asmjs':
-                assert frame.jf_gcmap[0] & 31 == 0
+            assert frame.jf_gcmap[0] & 31 == 0
             assert getmap(frame).count('1') == 3 # p1, p2, p3
             frame.jf_descr = frame.jf_force_descr # make guard_not_forced fail
             assert x == 1

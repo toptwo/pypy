@@ -2,7 +2,7 @@
 import py
 import platform
 import sys, ctypes
-from cffi import FFI, CDefError
+from cffi import FFI, CDefError, FFIError
 from pypy.module.test_lib_pypy.cffi_tests.support import *
 
 SIZE_OF_INT   = ctypes.sizeof(ctypes.c_int)
@@ -866,25 +866,25 @@ class BackendTests:
 
     def test_enum(self):
         ffi = FFI(backend=self.Backend())
-        ffi.cdef("enum foo { A, B, CC, D };")
-        assert ffi.string(ffi.cast("enum foo", 0)) == "A"
-        assert ffi.string(ffi.cast("enum foo", 2)) == "CC"
-        assert ffi.string(ffi.cast("enum foo", 3)) == "D"
+        ffi.cdef("enum foo { A0, B0, CC0, D0 };")
+        assert ffi.string(ffi.cast("enum foo", 0)) == "A0"
+        assert ffi.string(ffi.cast("enum foo", 2)) == "CC0"
+        assert ffi.string(ffi.cast("enum foo", 3)) == "D0"
         assert ffi.string(ffi.cast("enum foo", 4)) == "4"
-        ffi.cdef("enum bar { A, B=-2, CC, D, E };")
-        assert ffi.string(ffi.cast("enum bar", 0)) == "A"
-        assert ffi.string(ffi.cast("enum bar", -2)) == "B"
-        assert ffi.string(ffi.cast("enum bar", -1)) == "CC"
-        assert ffi.string(ffi.cast("enum bar", 1)) == "E"
+        ffi.cdef("enum bar { A1, B1=-2, CC1, D1, E1 };")
+        assert ffi.string(ffi.cast("enum bar", 0)) == "A1"
+        assert ffi.string(ffi.cast("enum bar", -2)) == "B1"
+        assert ffi.string(ffi.cast("enum bar", -1)) == "CC1"
+        assert ffi.string(ffi.cast("enum bar", 1)) == "E1"
         assert ffi.cast("enum bar", -2) != ffi.cast("enum bar", -2)
         assert ffi.cast("enum foo", 0) != ffi.cast("enum bar", 0)
         assert ffi.cast("enum bar", 0) != ffi.cast("int", 0)
-        assert repr(ffi.cast("enum bar", -1)) == "<cdata 'enum bar' -1: CC>"
+        assert repr(ffi.cast("enum bar", -1)) == "<cdata 'enum bar' -1: CC1>"
         assert repr(ffi.cast("enum foo", -1)) == (  # enums are unsigned, if
             "<cdata 'enum foo' 4294967295>")        # they contain no neg value
-        ffi.cdef("enum baz { A=0x1000, B=0x2000 };")
-        assert ffi.string(ffi.cast("enum baz", 0x1000)) == "A"
-        assert ffi.string(ffi.cast("enum baz", 0x2000)) == "B"
+        ffi.cdef("enum baz { A2=0x1000, B2=0x2000 };")
+        assert ffi.string(ffi.cast("enum baz", 0x1000)) == "A2"
+        assert ffi.string(ffi.cast("enum baz", 0x2000)) == "B2"
 
     def test_enum_in_struct(self):
         ffi = FFI(backend=self.Backend())
@@ -916,6 +916,16 @@ class BackendTests:
         invalid_value = ffi.cast("enum foo", 2)
         assert int(invalid_value) == 2
         assert ffi.string(invalid_value) == "2"
+
+    def test_enum_char_hex_oct(self):
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef(r"enum foo{A='!', B='\'', C=0x10, D=010, E=- 0x10, F=-010};")
+        assert ffi.string(ffi.cast("enum foo", ord('!'))) == "A"
+        assert ffi.string(ffi.cast("enum foo", ord("'"))) == "B"
+        assert ffi.string(ffi.cast("enum foo", 16)) == "C"
+        assert ffi.string(ffi.cast("enum foo", 8)) == "D"
+        assert ffi.string(ffi.cast("enum foo", -16)) == "E"
+        assert ffi.string(ffi.cast("enum foo", -8)) == "F"
 
     def test_array_of_struct(self):
         ffi = FFI(backend=self.Backend())
@@ -949,6 +959,25 @@ class BackendTests:
         assert ffi.offsetof("struct foo", "a") == 0
         assert ffi.offsetof("struct foo", "b") == 4
         assert ffi.offsetof("struct foo", "c") == 8
+
+    def test_offsetof_nested(self):
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef("struct foo { int a, b, c; };"
+                 "struct bar { struct foo d, e; };")
+        assert ffi.offsetof("struct bar", "e") == 12
+        py.test.raises(KeyError, ffi.offsetof, "struct bar", "e.a")
+        assert ffi.offsetof("struct bar", "e", "a") == 12
+        assert ffi.offsetof("struct bar", "e", "b") == 16
+        assert ffi.offsetof("struct bar", "e", "c") == 20
+
+    def test_offsetof_array(self):
+        ffi = FFI(backend=self.Backend())
+        assert ffi.offsetof("int[]", 51) == 51 * ffi.sizeof("int")
+        assert ffi.offsetof("int *", 51) == 51 * ffi.sizeof("int")
+        ffi.cdef("struct bar { int a, b; int c[99]; };")
+        assert ffi.offsetof("struct bar", "c") == 2 * ffi.sizeof("int")
+        assert ffi.offsetof("struct bar", "c", 0) == 2 * ffi.sizeof("int")
+        assert ffi.offsetof("struct bar", "c", 51) == 53 * ffi.sizeof("int")
 
     def test_alignof(self):
         ffi = FFI(backend=self.Backend())
@@ -1323,6 +1352,16 @@ class BackendTests:
         e = ffi.cast("enum e", 0)
         assert ffi.string(e) == "AA"     # pick the first one arbitrarily
 
+    def test_enum_refer_previous_enum_value(self):
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef("enum e { AA, BB=2, CC=4, DD=BB, EE, FF=CC, GG=FF };")
+        assert ffi.string(ffi.cast("enum e", 2)) == "BB"
+        assert ffi.string(ffi.cast("enum e", 3)) == "EE"
+        assert ffi.sizeof("char[DD]") == 2
+        assert ffi.sizeof("char[EE]") == 3
+        assert ffi.sizeof("char[FF]") == 4
+        assert ffi.sizeof("char[GG]") == 4
+
     def test_nested_anonymous_struct(self):
         ffi = FFI(backend=self.Backend())
         ffi.cdef("""
@@ -1472,8 +1511,10 @@ class BackendTests:
         p = ffi.new("struct foo_s *")
         a = ffi.addressof(p[0])
         assert repr(a).startswith("<cdata 'struct foo_s *' 0x")
+        assert a == p
         py.test.raises(TypeError, ffi.addressof, p)
         py.test.raises((AttributeError, TypeError), ffi.addressof, 5)
+        py.test.raises(TypeError, ffi.addressof, ffi.cast("int", 5))
 
     def test_addressof_field(self):
         ffi = FFI(backend=self.Backend())
@@ -1486,12 +1527,66 @@ class BackendTests:
         assert a == ffi.addressof(p, 'y')
         assert a != ffi.addressof(p, 'x')
 
+    def test_addressof_field_nested(self):
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef("struct foo_s { int x, y; };"
+                 "struct bar_s { struct foo_s a, b; };")
+        p = ffi.new("struct bar_s *")
+        py.test.raises(KeyError, ffi.addressof, p[0], 'b.y')
+        a = ffi.addressof(p[0], 'b', 'y')
+        assert int(ffi.cast("uintptr_t", a)) == (
+            int(ffi.cast("uintptr_t", p)) +
+            ffi.sizeof("struct foo_s") + ffi.sizeof("int"))
+
     def test_addressof_anonymous_struct(self):
         ffi = FFI()
         ffi.cdef("typedef struct { int x; } foo_t;")
         p = ffi.new("foo_t *")
         a = ffi.addressof(p[0])
         assert a == p
+
+    def test_addressof_array(self):
+        ffi = FFI()
+        p = ffi.new("int[52]")
+        p0 = ffi.addressof(p)
+        assert p0 == p
+        assert ffi.typeof(p0) is ffi.typeof("int(*)[52]")
+        py.test.raises(TypeError, ffi.addressof, p0)
+        #
+        p1 = ffi.addressof(p, 25)
+        assert ffi.typeof(p1) is ffi.typeof("int *")
+        assert (p1 - p) == 25
+        assert ffi.addressof(p, 0) == p
+
+    def test_addressof_pointer(self):
+        ffi = FFI()
+        array = ffi.new("int[50]")
+        p = ffi.cast("int *", array)
+        py.test.raises(TypeError, ffi.addressof, p)
+        assert ffi.addressof(p, 0) == p
+        assert ffi.addressof(p, 25) == p + 25
+        assert ffi.typeof(ffi.addressof(p, 25)) == ffi.typeof(p)
+        #
+        ffi.cdef("struct foo { int a, b; };")
+        array = ffi.new("struct foo[50]")
+        p = ffi.cast("int *", array)
+        py.test.raises(TypeError, ffi.addressof, p)
+        assert ffi.addressof(p, 0) == p
+        assert ffi.addressof(p, 25) == p + 25
+        assert ffi.typeof(ffi.addressof(p, 25)) == ffi.typeof(p)
+
+    def test_addressof_array_in_struct(self):
+        ffi = FFI()
+        ffi.cdef("struct foo { int a, b; int c[50]; };")
+        p = ffi.new("struct foo *")
+        p1 = ffi.addressof(p, "c", 25)
+        assert ffi.typeof(p1) is ffi.typeof("int *")
+        assert p1 == ffi.cast("int *", p) + 27
+        assert ffi.addressof(p, "c") == ffi.cast("int *", p) + 2
+        assert ffi.addressof(p, "c", 0) == ffi.cast("int *", p) + 2
+        p2 = ffi.addressof(p, 1)
+        assert ffi.typeof(p2) is ffi.typeof("struct foo *")
+        assert p2 == p + 1
 
     def test_multiple_independent_structs(self):
         ffi1 = FFI(); ffi1.cdef("struct foo { int x; };")
@@ -1544,6 +1639,7 @@ class BackendTests:
         ffi2.include(ffi1)
         p = ffi2.cast("enum foo", 1)
         assert ffi2.string(p) == "FB"
+        assert ffi2.sizeof("char[FC]") == 2
 
     def test_include_typedef_2(self):
         backend = self.Backend()
@@ -1553,6 +1649,12 @@ class BackendTests:
         ffi2.include(ffi1)
         p = ffi2.new("foo_p", [142])
         assert p.x == 142
+
+    def test_ignore_multiple_declarations_of_constant(self):
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef("#define FOO 42")
+        ffi.cdef("#define FOO 42")
+        py.test.raises(FFIError, ffi.cdef, "#define FOO 43")
 
     def test_struct_packed(self):
         ffi = FFI(backend=self.Backend())
@@ -1564,10 +1666,32 @@ class BackendTests:
         assert ffi.alignof("struct is_packed") == 1
         s = ffi.new("struct is_packed[2]")
         s[0].b = 42623381
-        s[0].a = 'X'
+        s[0].a = b'X'
         s[1].b = -4892220
-        s[1].a = 'Y'
+        s[1].a = b'Y'
         assert s[0].b == 42623381
-        assert s[0].a == 'X'
+        assert s[0].a == b'X'
         assert s[1].b == -4892220
-        assert s[1].a == 'Y'
+        assert s[1].a == b'Y'
+
+    def test_define_integer_constant(self):
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef("""
+            #define DOT_0 0
+            #define DOT 100
+            #define DOT_OCT 0100l
+            #define DOT_HEX 0x100u
+            #define DOT_HEX2 0X10
+            #define DOT_UL 1000UL
+            enum foo {AA, BB=DOT, CC};
+        """)
+        lib = ffi.dlopen(None)
+        assert ffi.string(ffi.cast("enum foo", 100)) == "BB"
+        assert lib.DOT_0 == 0
+        assert lib.DOT == 100
+        assert lib.DOT_OCT == 0o100
+        assert lib.DOT_HEX == 0x100
+        assert lib.DOT_HEX2 == 0x10
+        assert lib.DOT_UL == 1000
+
+

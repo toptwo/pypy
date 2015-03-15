@@ -1,5 +1,5 @@
 from rpython.jit.metainterp.typesystem import deref, fieldType, arrayItem
-from rpython.rtyper.lltypesystem.rclass import OBJECT
+from rpython.rtyper.rclass import OBJECT
 from rpython.rtyper.lltypesystem import lltype, llmemory
 from rpython.translator.backendopt.graphanalyze import BoolGraphAnalyzer
 
@@ -22,6 +22,8 @@ class EffectInfo(object):
     OS_STR2UNICODE              = 2    # "str.str2unicode"
     OS_SHRINK_ARRAY             = 3    # rgc.ll_shrink_array
     OS_DICT_LOOKUP              = 4    # ll_dict_lookup
+    OS_THREADLOCALREF_GET       = 5    # llop.threadlocalref_get
+    OS_NOT_IN_TRACE             = 8    # for calls not recorded in the jit trace
     #
     OS_STR_CONCAT               = 22   # "stroruni.concat"
     OS_STR_SLICE                = 23   # "stroruni.slice"
@@ -33,6 +35,7 @@ class EffectInfo(object):
     OS_STREQ_NONNULL_CHAR       = 29   # s1 == char  (assert s1!=NULL)
     OS_STREQ_CHECKNULL_CHAR     = 30   # s1!=NULL and s1==char
     OS_STREQ_LENGTHOK           = 31   # s1 == s2    (assert len(s1)==len(s2))
+    OS_STR_CMP                  = 32   # "stroruni.cmp"
     #
     OS_UNI_CONCAT               = 42   #
     OS_UNI_SLICE                = 43   #
@@ -44,6 +47,7 @@ class EffectInfo(object):
     OS_UNIEQ_NONNULL_CHAR       = 49   #   (must be the same amount as for
     OS_UNIEQ_CHECKNULL_CHAR     = 50   #   STR, in the same order)
     OS_UNIEQ_LENGTHOK           = 51   #
+    OS_UNI_CMP                  = 52
     _OS_offset_uni              = OS_UNI_CONCAT - OS_STR_CONCAT
     #
     OS_LIBFFI_CALL              = 62
@@ -76,6 +80,7 @@ class EffectInfo(object):
     OS_LLONG_U_TO_FLOAT         = 94
     #
     OS_MATH_SQRT                = 100
+    OS_MATH_READ_TIMESTAMP      = 101
     #
     OS_RAW_MALLOC_VARSIZE_CHAR  = 110
     OS_RAW_FREE                 = 111
@@ -90,7 +95,10 @@ class EffectInfo(object):
     _OS_CANRAISE = set([
         OS_NONE, OS_STR2UNICODE, OS_LIBFFI_CALL, OS_RAW_MALLOC_VARSIZE_CHAR,
         OS_JIT_FORCE_VIRTUAL, OS_SHRINK_ARRAY, OS_DICT_LOOKUP,
+        OS_NOT_IN_TRACE,
     ])
+
+    _NO_CALL_RELEASE_GIL_TARGET = (llmemory.NULL, 0)
 
     def __new__(cls, readonly_descrs_fields, readonly_descrs_arrays,
                 readonly_descrs_interiorfields,
@@ -99,7 +107,7 @@ class EffectInfo(object):
                 extraeffect=EF_CAN_RAISE,
                 oopspecindex=OS_NONE,
                 can_invalidate=False,
-                call_release_gil_target=llmemory.NULL,
+                call_release_gil_target=_NO_CALL_RELEASE_GIL_TARGET,
                 extradescrs=None):
         key = (frozenset_or_none(readonly_descrs_fields),
                frozenset_or_none(readonly_descrs_arrays),
@@ -110,7 +118,8 @@ class EffectInfo(object):
                extraeffect,
                oopspecindex,
                can_invalidate)
-        if call_release_gil_target:
+        tgt_func, tgt_saveerr = call_release_gil_target
+        if tgt_func:
             key += (object(),)    # don't care about caching in this case
         if key in cls._cache:
             return cls._cache[key]
@@ -165,7 +174,8 @@ class EffectInfo(object):
         return self.extraeffect >= self.EF_RANDOM_EFFECTS
 
     def is_call_release_gil(self):
-        return bool(self.call_release_gil_target)
+        tgt_func, tgt_saveerr = self.call_release_gil_target
+        return bool(tgt_func)
 
     def __repr__(self):
         more = ''
@@ -188,7 +198,8 @@ def effectinfo_from_writeanalyze(effects, cpu,
                                  extraeffect=EffectInfo.EF_CAN_RAISE,
                                  oopspecindex=EffectInfo.OS_NONE,
                                  can_invalidate=False,
-                                 call_release_gil_target=llmemory.NULL,
+                                 call_release_gil_target=
+                                     EffectInfo._NO_CALL_RELEASE_GIL_TARGET,
                                  extradescr=None):
     from rpython.translator.backendopt.writeanalyze import top_set
     if effects is top_set or extraeffect == EffectInfo.EF_RANDOM_EFFECTS:

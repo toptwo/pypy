@@ -125,13 +125,14 @@ class PyFrame(W_Root):
         else:
             return self.space.builtin
 
+    _NO_CELLS = []
+
     @jit.unroll_safe
     def initialize_frame_scopes(self, outer_func, code):
         # regular functions always have CO_OPTIMIZED and CO_NEWLOCALS.
         # class bodies only have CO_NEWLOCALS.
         # CO_NEWLOCALS: make a locals dict unless optimized is also set
         # CO_OPTIMIZED: no locals dict needed at all
-        # NB: this method is overridden in nestedscope.py
         flags = code.co_flags
         if not (flags & pycode.CO_OPTIMIZED):
             if flags & pycode.CO_NEWLOCALS:
@@ -144,7 +145,7 @@ class PyFrame(W_Root):
         nfreevars = len(code.co_freevars)
         if not nfreevars:
             if not ncellvars:
-                self.cells = []
+                self.cells = self._NO_CELLS
                 return            # no self.cells needed - fast path
         elif outer_func is None:
             space = self.space
@@ -438,7 +439,10 @@ class PyFrame(W_Root):
         f_back = space.interp_w(PyFrame, w_f_back, can_be_None=True)
         new_frame.f_backref = jit.non_virtual_ref(f_back)
 
-        new_frame.builtin = space.interp_w(Module, w_builtin)
+        if space.config.objspace.honor__builtins__:
+            new_frame.builtin = space.interp_w(Module, w_builtin)
+        else:
+            assert space.interp_w(Module, w_builtin) is space.builtin
         new_frame.set_blocklist([unpickle_block(space, w_blk)
                                  for w_blk in space.unpackiterable(w_blockstack)])
         values_w = maker.slp_from_tuple_with_nulls(space, w_valuestack)
@@ -511,10 +515,10 @@ class PyFrame(W_Root):
         for i in range(min(len(varnames), self.getcode().co_nlocals)):
             name = varnames[i]
             w_value = self.locals_stack_w[i]
-            w_name = self.space.wrap(name)
             if w_value is not None:
-                self.space.setitem(self.w_locals, w_name, w_value)
+                self.space.setitem_str(self.w_locals, name, w_value)
             else:
+                w_name = self.space.wrap(name)
                 try:
                     self.space.delitem(self.w_locals, w_name)
                 except OperationError as e:
@@ -523,9 +527,10 @@ class PyFrame(W_Root):
 
         # cellvars are values exported to inner scopes
         # freevars are values coming from outer scopes
-        freevarnames = list(self.pycode.co_cellvars)
+        # (see locals2fast for why CO_OPTIMIZED)
+        freevarnames = self.pycode.co_cellvars
         if self.pycode.co_flags & consts.CO_OPTIMIZED:
-            freevarnames.extend(self.pycode.co_freevars)
+            freevarnames = freevarnames + self.pycode.co_freevars
         for i in range(len(freevarnames)):
             name = freevarnames[i]
             cell = self.cells[i]
@@ -534,8 +539,7 @@ class PyFrame(W_Root):
             except ValueError:
                 pass
             else:
-                w_name = self.space.wrap(name)
-                self.space.setitem(self.w_locals, w_name, w_value)
+                self.space.setitem_str(self.w_locals, name, w_value)
 
 
     @jit.unroll_safe
@@ -548,28 +552,28 @@ class PyFrame(W_Root):
         new_fastlocals_w = [None] * numlocals
 
         for i in range(min(len(varnames), numlocals)):
-            w_name = self.space.wrap(varnames[i])
-            try:
-                w_value = self.space.getitem(self.w_locals, w_name)
-            except OperationError, e:
-                if not e.match(self.space, self.space.w_KeyError):
-                    raise
-            else:
+            name = varnames[i]
+            w_value = self.space.finditem_str(self.w_locals, name)
+            if w_value is not None:
                 new_fastlocals_w[i] = w_value
 
         self.setfastscope(new_fastlocals_w)
 
-        freevarnames = self.pycode.co_cellvars + self.pycode.co_freevars
+        freevarnames = self.pycode.co_cellvars
+        if self.pycode.co_flags & consts.CO_OPTIMIZED:
+            freevarnames = freevarnames + self.pycode.co_freevars
+            # If the namespace is unoptimized, then one of the
+            # following cases applies:
+            # 1. It does not contain free variables, because it
+            #    uses import * or is a top-level namespace.
+            # 2. It is a class namespace.
+            # We don't want to accidentally copy free variables
+            # into the locals dict used by the class.
         for i in range(len(freevarnames)):
             name = freevarnames[i]
             cell = self.cells[i]
-            w_name = self.space.wrap(name)
-            try:
-                w_value = self.space.getitem(self.w_locals, w_name)
-            except OperationError, e:
-                if not e.match(self.space, self.space.w_KeyError):
-                    raise
-            else:
+            w_value = self.space.finditem_str(self.w_locals, name)
+            if w_value is not None:
                 cell.set(w_value)
 
     @jit.unroll_safe

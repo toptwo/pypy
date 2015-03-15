@@ -11,6 +11,9 @@ class VerificationMissing(Exception):
     """
 
 
+LIST_OF_FILE_NAMES = ['sources', 'include_dirs', 'library_dirs',
+                      'extra_objects', 'depends']
+
 def get_extension(srcfilename, modname, sources=(), **kwds):
     from distutils.core import Extension
     allsources = [srcfilename]
@@ -38,6 +41,7 @@ def _build(tmpdir, ext):
     import distutils.errors
     #
     dist = Distribution({'ext_modules': [ext]})
+    dist.parse_config_files()
     options = dist.get_option_dict('build_ext')
     options['force'] = ('ffiplatform', True)
     options['build_lib'] = ('ffiplatform', tmpdir)

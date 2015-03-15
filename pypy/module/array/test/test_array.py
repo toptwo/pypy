@@ -418,6 +418,10 @@ class BaseArrayTests:
         assert self.array('u', unicode('hello')).tounicode() == \
                unicode('hello')
 
+    def test_empty_tostring(self):
+        a = self.array('l')
+        assert a.tostring() == b''
+
     def test_buffer(self):
         a = self.array('h', 'Hi')
         buf = buffer(a)
@@ -1031,8 +1035,3 @@ class AppTestArray(BaseArrayTests):
 
     def test_fresh_array_buffer_str(self):
         assert str(buffer(self.array('i'))) == ''
-
-
-class AppTestArrayBuiltinShortcut(AppTestArray):
-    spaceconfig = AppTestArray.spaceconfig.copy()
-    spaceconfig['objspace.std.builtinshortcut'] = True

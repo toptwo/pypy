@@ -508,7 +508,10 @@ def descr_new_funcptr(space, w_tp, addr, w_args, w_res, flags=FUNCFLAG_CDECL):
     argshapes = unpack_argshapes(space, w_args)
     resshape = unpack_resshape(space, w_res)
     ffi_args = [shape.get_basic_ffi_type() for shape in argshapes]
-    ffi_res = resshape.get_basic_ffi_type()
+    if resshape is not None:
+        ffi_res = resshape.get_basic_ffi_type()
+    else:
+        ffi_res = ffi_type_void
     try:
         ptr = RawFuncPtr('???', ffi_args, ffi_res, rffi.cast(rffi.VOIDP, addr),
                          flags)
@@ -605,19 +608,19 @@ def get_libc(space):
     return space.wrap(W_CDLL(space, name, cdll))
 
 def get_errno(space):
-    return space.wrap(rposix.get_errno())
+    return space.wrap(rposix.get_saved_errno())
 
 def set_errno(space, w_errno):
-    rposix.set_errno(space.int_w(w_errno))
+    rposix.set_saved_errno(space.int_w(w_errno))
 
 if sys.platform == 'win32':
+    # see also
+    # https://bitbucket.org/pypy/pypy/issue/1944/ctypes-on-windows-getlasterror
     def get_last_error(space):
-        from rpython.rlib.rwin32 import GetLastError
-        return space.wrap(GetLastError())
+        return space.wrap(rwin32.GetLastError_saved())
     @unwrap_spec(error=int)
     def set_last_error(space, error):
-        from rpython.rlib.rwin32 import SetLastError
-        SetLastError(error)
+        rwin32.SetLastError_saved(error)
 else:
     # always have at least a dummy version of these functions
     # (https://bugs.pypy.org/issue1242)

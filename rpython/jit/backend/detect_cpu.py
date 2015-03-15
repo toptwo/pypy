@@ -15,7 +15,6 @@ MODEL_X86_NO_SSE2 = 'x86-without-sse2'
 MODEL_X86_64      = 'x86-64'
 MODEL_ARM         = 'arm'
 MODEL_PPC_64      = 'ppc-64'
-MODEL_ASMJS       = 'asmjs'
 # don't use '_' in the model strings; they are replaced by '-'
 
 
@@ -27,7 +26,6 @@ def detect_model_from_c_compiler():
         MODEL_ARM:    ['__arm__', '__thumb__','_M_ARM_EP'],
         MODEL_X86:    ['i386', '__i386', '__i386__', '__i686__','_M_IX86'],
         MODEL_PPC_64: ['__powerpc64__'],
-        MODEL_ASMJS:  ['__EMSCRIPTEN__'],
     }
     for k, v in mapping.iteritems():
         for macro in v:
@@ -75,11 +73,14 @@ def detect_model_from_host_platform():
             result = MODEL_X86_64
         else:
             assert sys.maxint == 2**31-1
-            from rpython.jit.backend.x86.detect_sse2 import detect_sse2
-            if detect_sse2():
+            from rpython.jit.backend.x86 import detect_sse2
+            if detect_sse2.detect_sse2():
                 result = MODEL_X86
             else:
                 result = MODEL_X86_NO_SSE2
+            if detect_sse2.detect_x32_mode():
+                raise ProcessorAutodetectError(
+                    'JITting in x32 mode is not implemented')
     #
     if result.startswith('arm'):
         from rpython.jit.backend.arm.detect import detect_float
@@ -109,8 +110,6 @@ def getcpuclassname(backend_name="auto"):
         return "rpython.jit.backend.x86.runner", "CPU_X86_64"
     elif backend_name == MODEL_ARM:
         return "rpython.jit.backend.arm.runner", "CPU_ARM"
-    elif backend_name == MODEL_ASMJS:
-        return "rpython.jit.backend.asmjs.runner", "CPU_ASMJS"
     else:
         raise ProcessorAutodetectError, (
             "we have no JIT backend for this cpu: '%s'" % backend_name)

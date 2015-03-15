@@ -28,23 +28,20 @@ def entry_point(args):
     bytecode, pool = load_bytecode(filename)
 
     if not onlyjit:
-        start = time.time()
+        start = time.clock()
         res = interp_nonjit(bytecode, inputarg=x, pool=pool)
-        stop = time.time()
+        stop = time.clock()
         print 'Non jitted:    %d (%f seconds)' % (res, stop-start)
 
-    start = time.time()
+    start = time.clock()
     res = interp(bytecode, inputarg=x, pool=pool)
-    stop = time.time()
+    stop = time.clock()
     print 'Warmup jitted: %d (%f seconds)' % (res, stop-start)
 
-    start = time.time()
+    start = time.clock()
     res = interp(bytecode, inputarg=x, pool=pool)
-    stop = time.time()
+    stop = time.clock()
     print 'Warmed jitted: %d (%f seconds)' % (res, stop-start)
-
-    for x in [1,2,3,4,9,10,11,12,13,17,20,21,512,52017]:
-        assert interp_nonjit(bytecode, inputarg=x, pool=pool) == interp(bytecode, inputarg=x, pool=pool)
 
     return 0
 

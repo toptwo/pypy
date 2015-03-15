@@ -189,13 +189,11 @@ class VStringPlainValue(VAbstractStringValue):
             charvalue = self.getitem(i)
             if charvalue is not None:
                 charbox = charvalue.force_box(string_optimizer)
-                if not (isinstance(charbox, Const) and
-                        charbox.same_constant(CONST_0)):
-                    op = ResOperation(mode.STRSETITEM, [targetbox,
-                                                        offsetbox,
-                                                        charbox],
-                                      None)
-                    string_optimizer.emit_operation(op)
+                op = ResOperation(mode.STRSETITEM, [targetbox,
+                                                    offsetbox,
+                                                    charbox],
+                                  None)
+                string_optimizer.emit_operation(op)
             offsetbox = _int_add(string_optimizer, offsetbox, CONST_1)
         return offsetbox
 
@@ -474,7 +472,7 @@ class OptString(optimizer.Optimization):
                 if index < len1:
                     return self.strgetitem(value.left, vindex, mode)
                 else:
-                    vindex = optimizer.ConstantValue(ConstInt(index - len1))
+                    vindex = optimizer.ConstantIntValue(ConstInt(index - len1))
                     return self.strgetitem(value.right, vindex, mode)
         #
         resbox = _strgetitem(self, value.force_box(self), vindex.force_box(self), mode, resbox)
@@ -523,7 +521,7 @@ class OptString(optimizer.Optimization):
             dst_start = dststart.force_box(self).getint()
             actual_length = length.force_box(self).getint()
             for index in range(actual_length):
-                vresult = self.strgetitem(src, optimizer.ConstantValue(ConstInt(index + src_start)), mode)
+                vresult = self.strgetitem(src, optimizer.ConstantIntValue(ConstInt(index + src_start)), mode)
                 if dst_virtual:
                     dst.setitem(index + dst_start, vresult)
                 else:
@@ -730,6 +728,25 @@ class OptString(optimizer.Optimization):
                                              v1.vstart.force_box(self),
                                              v1.vlength.force_box(self),
                                              v2.force_box(self)], resultbox, mode)
+            return True
+        return False
+
+    def opt_call_stroruni_STR_CMP(self, op, mode):
+        v1 = self.getvalue(op.getarg(1))
+        v2 = self.getvalue(op.getarg(2))
+        l1box = v1.getstrlen(None, mode, None)
+        l2box = v2.getstrlen(None, mode, None)
+        if (l1box is not None and l2box is not None and
+            isinstance(l1box, ConstInt) and
+            isinstance(l2box, ConstInt) and
+            l1box.value == l2box.value == 1):
+            # comparing two single chars
+            vchar1 = self.strgetitem(v1, optimizer.CVAL_ZERO, mode)
+            vchar2 = self.strgetitem(v2, optimizer.CVAL_ZERO, mode)
+            seo = self.optimizer.send_extra_operation
+            seo(ResOperation(rop.INT_SUB, [vchar1.force_box(self),
+                                           vchar2.force_box(self)],
+                             op.result))
             return True
         return False
 

@@ -34,7 +34,7 @@ Version History:
 
 LOOPS = 50000
 
-from time import time as clock
+from time import clock
 
 __version__ = "1.1"
 

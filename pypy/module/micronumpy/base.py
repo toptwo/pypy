@@ -1,7 +1,7 @@
 from pypy.interpreter.baseobjspace import W_Root
-from pypy.interpreter.error import OperationError
+from pypy.interpreter.error import OperationError, oefmt
 from rpython.tool.pairtype import extendabletype
-
+from pypy.module.micronumpy import support
 
 def wrap_impl(space, w_cls, w_instance, impl):
     if w_cls is None or space.is_w(w_cls, space.gettypefor(W_NDimArray)):
@@ -18,7 +18,12 @@ class ArrayArgumentException(Exception):
     pass
 
 
-class W_NDimArray(W_Root):
+class W_NumpyObject(W_Root):
+    """Base class for ndarrays and scalars (aka boxes)."""
+    _attrs_ = []
+
+
+class W_NDimArray(W_NumpyObject):
     __metaclass__ = extendabletype
 
     def __init__(self, implementation):
@@ -28,22 +33,43 @@ class W_NDimArray(W_Root):
         self.implementation = implementation
 
     @staticmethod
-    def from_shape(space, shape, dtype, order='C', w_instance=None):
+    def from_shape(space, shape, dtype, order='C', w_instance=None, zero=True):
         from pypy.module.micronumpy import concrete
         from pypy.module.micronumpy.strides import calc_strides
         strides, backstrides = calc_strides(shape, dtype.base, order)
         impl = concrete.ConcreteArray(shape, dtype.base, order, strides,
-                                      backstrides)
+                                      backstrides, zero=zero)
         if w_instance:
             return wrap_impl(space, space.type(w_instance), w_instance, impl)
         return W_NDimArray(impl)
 
     @staticmethod
-    def from_shape_and_storage(space, shape, storage, dtype, order='C', owning=False,
-                               w_subtype=None, w_base=None, writable=True):
+    def from_shape_and_storage(space, shape, storage, dtype, storage_bytes=-1,
+                               order='C', owning=False, w_subtype=None,
+                               w_base=None, writable=True, strides=None):
         from pypy.module.micronumpy import concrete
-        from pypy.module.micronumpy.strides import calc_strides
-        strides, backstrides = calc_strides(shape, dtype, order)
+        from pypy.module.micronumpy.strides import (calc_strides,
+                                                    calc_backstrides)
+        isize = dtype.elsize
+        if storage_bytes > 0 :
+            totalsize = support.product(shape) * isize
+            if totalsize > storage_bytes:
+                raise OperationError(space.w_TypeError, space.wrap(
+                    "buffer is too small for requested array"))
+        else:
+            storage_bytes = support.product(shape) * isize
+        if strides is None:
+            strides, backstrides = calc_strides(shape, dtype, order)
+        else:
+            if len(strides) != len(shape):
+                raise oefmt(space.w_ValueError,
+                    'strides, if given, must be the same length as shape')
+            for i in range(len(strides)):
+                if strides[i] < 0 or strides[i]*shape[i] > storage_bytes:
+                    raise oefmt(space.w_ValueError,
+                        'strides is incompatible with shape of requested '
+                        'array and size of buffer')
+            backstrides = calc_backstrides(strides, shape)
         if w_base is not None:
             if owning:
                 raise OperationError(space.w_ValueError,
@@ -84,6 +110,27 @@ class W_NDimArray(W_Root):
         else:
             w_val = dtype.coerce(space, space.wrap(0))
         return convert_to_array(space, w_val)
+
+    @staticmethod
+    def from_scalar(space, w_scalar):
+        """Convert a scalar into a 0-dim array"""
+        dtype = w_scalar.get_dtype(space)
+        w_arr = W_NDimArray.from_shape(space, [], dtype)
+        w_arr.set_scalar_value(w_scalar)
+        return w_arr
+
+    def get_shape(self):
+        return self.implementation.get_shape()
+
+    def get_dtype(self):
+        return self.implementation.dtype
+
+    def get_order(self):
+        return self.implementation.order
+
+    def ndims(self):
+        return len(self.get_shape())
+    ndims._always_inline_ = True
 
 
 def convert_to_array(space, w_obj):

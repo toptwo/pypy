@@ -3,8 +3,9 @@ from pypy.interpreter.gateway import unwrap_spec, WrappedDefault
 from rpython.rlib.buffer import SubBuffer
 from rpython.rlib.rstring import strip_spaces
 from rpython.rtyper.lltypesystem import lltype, rffi
-from pypy.module.micronumpy import descriptor, loop
-from pypy.module.micronumpy.base import W_NDimArray, convert_to_array
+from pypy.module.micronumpy import descriptor, loop, support
+from pypy.module.micronumpy.base import (
+    W_NDimArray, convert_to_array, W_NumpyObject)
 from pypy.module.micronumpy.converters import shape_converter
 
 
@@ -24,24 +25,44 @@ def build_scalar(space, w_dtype, w_state):
     return box
 
 
+def try_array_method(space, w_object, w_dtype=None):
+    w___array__ = space.lookup(w_object, "__array__")
+    if w___array__ is None:
+        return None
+    if w_dtype is None:
+        w_dtype = space.w_None
+    w_array = space.get_and_call_function(w___array__, w_object, w_dtype)
+    if isinstance(w_array, W_NDimArray):
+        return w_array
+    else:
+        raise oefmt(space.w_ValueError,
+                    "object __array__ method not producing an array")
+
+
 @unwrap_spec(ndmin=int, copy=bool, subok=bool)
 def array(space, w_object, w_dtype=None, copy=True, w_order=None, subok=False,
           ndmin=0):
+    w_res = _array(space, w_object, w_dtype, copy, w_order, subok)
+    shape = w_res.get_shape()
+    if len(shape) < ndmin:
+        shape = [1] * (ndmin - len(shape)) + shape
+        impl = w_res.implementation.set_shape(space, w_res, shape)
+        if w_res is w_object:
+            return W_NDimArray(impl)
+        else:
+            w_res.implementation = impl
+    return w_res
+
+def _array(space, w_object, w_dtype=None, copy=True, w_order=None, subok=False):
     from pypy.module.micronumpy import strides
 
     # for anything that isn't already an array, try __array__ method first
     if not isinstance(w_object, W_NDimArray):
-        w___array__ = space.lookup(w_object, "__array__")
-        if w___array__ is not None:
-            if space.is_none(w_dtype):
-                w_dtype = space.w_None
-            w_array = space.get_and_call_function(w___array__, w_object, w_dtype)
-            if isinstance(w_array, W_NDimArray):
-                # feed w_array back into array() for other properties
-                return array(space, w_array, w_dtype, False, w_order, subok, ndmin)
-            else:
-                raise oefmt(space.w_ValueError,
-                            "object __array__ method not producing an array")
+        w_array = try_array_method(space, w_object, w_dtype)
+        if w_array is not None:
+            # continue with w_array, but do further operations in place
+            w_object = w_array
+            copy = False
 
     dtype = descriptor.decode_w_dtype(space, w_dtype)
 
@@ -54,25 +75,35 @@ def array(space, w_object, w_dtype=None, copy=True, w_order=None, subok=False,
         if order != 'C':  # or order != 'F':
             raise oefmt(space.w_ValueError, "Unknown order: %s", order)
 
-    # arrays with correct dtype
-    if isinstance(w_object, W_NDimArray) and \
-            (space.is_none(w_dtype) or w_object.get_dtype() is dtype):
-        shape = w_object.get_shape()
-        if copy:
-            w_ret = w_object.descr_copy(space)
-        else:
-            if ndmin <= len(shape):
+    if isinstance(w_object, W_NDimArray):
+        if (dtype is None or w_object.get_dtype() is dtype):
+            if copy and (subok or type(w_object) is W_NDimArray):
+                return w_object.descr_copy(space, w_order)
+            elif not copy and (subok or type(w_object) is W_NDimArray):
                 return w_object
-            new_impl = w_object.implementation.set_shape(space, w_object, shape)
-            w_ret = W_NDimArray(new_impl)
-        if ndmin > len(shape):
-            shape = [1] * (ndmin - len(shape)) + shape
-            w_ret.implementation = w_ret.implementation.set_shape(space,
-                                                                  w_ret, shape)
-        return w_ret
-
-    # not an array or incorrect dtype
-    shape, elems_w = strides.find_shape_and_elems(space, w_object, dtype)
+        # we have a ndarray, but need to copy or change dtype or create W_NDimArray
+        if dtype is None:
+            dtype = w_object.get_dtype()
+        if dtype != w_object.get_dtype():
+            # silently reject the copy value
+            copy = True
+        if copy:
+            shape = w_object.get_shape()
+            _elems_w = w_object.reshape(space, space.wrap(-1))
+            elems_w = [None] * w_object.get_size()
+            for i in range(len(elems_w)):
+                elems_w[i] = _elems_w.descr_getitem(space, space.wrap(i))
+        elif subok:
+            raise oefmt(space.w_NotImplementedError, 
+                "array(...copy=False, subok=True) not implemented yet")
+        else:
+            sz = support.product(w_object.get_shape()) * dtype.elsize
+            return W_NDimArray.from_shape_and_storage(space,
+                w_object.get_shape(),w_object.implementation.storage,
+                dtype, storage_bytes=sz, w_base=w_object)
+    else:
+        # not an array
+        shape, elems_w = strides.find_shape_and_elems(space, w_object, dtype)
     if dtype is None or (dtype.is_str_or_unicode() and dtype.elsize < 1):
         dtype = strides.find_dtype_for_seq(space, elems_w, dtype)
         if dtype is None:
@@ -81,8 +112,6 @@ def array(space, w_object, w_dtype=None, copy=True, w_order=None, subok=False,
             # promote S0 -> S1, U0 -> U1
             dtype = descriptor.variable_dtype(space, dtype.char + '1')
 
-    if ndmin > len(shape):
-        shape = [1] * (ndmin - len(shape)) + shape
     w_arr = W_NDimArray.from_shape(space, shape, dtype, order=order)
     if len(elems_w) == 1:
         w_arr.set_scalar_value(dtype.coerce(space, elems_w[0]))
@@ -91,13 +120,55 @@ def array(space, w_object, w_dtype=None, copy=True, w_order=None, subok=False,
     return w_arr
 
 
-def zeros(space, w_shape, w_dtype=None, w_order=None):
+def numpify(space, w_object):
+    """Convert the object to a W_NumpyObject"""
+    # XXX: code duplication with _array()
+    from pypy.module.micronumpy import strides
+    if isinstance(w_object, W_NumpyObject):
+        return w_object
+    # for anything that isn't already an array, try __array__ method first
+    w_array = try_array_method(space, w_object)
+    if w_array is not None:
+        return w_array
+
+    shape, elems_w = strides.find_shape_and_elems(space, w_object, None)
+    dtype = strides.find_dtype_for_seq(space, elems_w, None)
+    if dtype is None:
+        dtype = descriptor.get_dtype_cache(space).w_float64dtype
+    elif dtype.is_str_or_unicode() and dtype.elsize < 1:
+        # promote S0 -> S1, U0 -> U1
+        dtype = descriptor.variable_dtype(space, dtype.char + '1')
+
+    if len(elems_w) == 1:
+        return dtype.coerce(space, elems_w[0])
+    else:
+        w_arr = W_NDimArray.from_shape(space, shape, dtype)
+        loop.assign(space, w_arr, elems_w)
+        return w_arr
+
+
+def _zeros_or_empty(space, w_shape, w_dtype, w_order, zero):
     dtype = space.interp_w(descriptor.W_Dtype,
         space.call_function(space.gettypefor(descriptor.W_Dtype), w_dtype))
     if dtype.is_str_or_unicode() and dtype.elsize < 1:
         dtype = descriptor.variable_dtype(space, dtype.char + '1')
     shape = shape_converter(space, w_shape, dtype)
-    return W_NDimArray.from_shape(space, shape, dtype=dtype)
+    for dim in shape:
+        if dim < 0:
+            raise OperationError(space.w_ValueError, space.wrap(
+                "negative dimensions are not allowed"))
+    try:
+        support.product(shape)
+    except OverflowError:
+        raise OperationError(space.w_ValueError, space.wrap(
+            "array is too big."))
+    return W_NDimArray.from_shape(space, shape, dtype=dtype, zero=zero)
+
+def empty(space, w_shape, w_dtype=None, w_order=None):
+    return _zeros_or_empty(space, w_shape, w_dtype, w_order, zero=False)
+
+def zeros(space, w_shape, w_dtype=None, w_order=None):
+    return _zeros_or_empty(space, w_shape, w_dtype, w_order, zero=True)
 
 
 @unwrap_spec(subok=bool)
@@ -111,7 +182,8 @@ def empty_like(space, w_a, w_dtype=None, w_order=None, subok=True):
         if dtype.is_str_or_unicode() and dtype.elsize < 1:
             dtype = descriptor.variable_dtype(space, dtype.char + '1')
     return W_NDimArray.from_shape(space, w_a.get_shape(), dtype=dtype,
-                                  w_instance=w_a if subok else None)
+                                  w_instance=w_a if subok else None,
+                                  zero=False)
 
 
 def _fromstring_text(space, s, count, sep, length, dtype):
@@ -249,5 +321,5 @@ def frombuffer(space, w_buffer, w_dtype=None, count=-1, offset=0):
         return a
     else:
         writable = not buf.readonly
-    return W_NDimArray.from_shape_and_storage(space, [n], storage, dtype=dtype,
-                                              w_base=w_buffer, writable=writable)
+    return W_NDimArray.from_shape_and_storage(space, [n], storage, storage_bytes=s, 
+                                dtype=dtype, w_base=w_buffer, writable=writable)
