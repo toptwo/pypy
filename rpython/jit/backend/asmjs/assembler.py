@@ -194,7 +194,7 @@ class CompiledFuncASMJS(object):
         self.frame_info.clear()
         self.ensure_frame_depth(0)
 
-    def __del__(self):
+    def free(self):
         lltype.free(self.frame_info, flavor="raw")
         support.jitFree(self.compiled_funcid)
 
@@ -246,10 +246,13 @@ class CompiledFuncASMJS(object):
         clt.func = None
         for block in clt.compiled_blocks:
             self.compiled_blocks[block.compiled_blockid] = None
-            block.clt = None
+            block.free()
         self.num_removed_loops += 1
         if self.num_removed_loops < len(self.compiled_loops):
             self.reassemble()
+        else:
+            # Nothing is left referencing this function.
+            self.free()
 
     def ensure_frame_depth(self, required_offset):
         if SANITYCHECK:
@@ -725,7 +728,7 @@ class CompiledBlockASMJS(object):
         self.box_expression_graveyard = {}
         self.box_variable_refcounts = {}
 
-    def __del__(self):
+    def free(self):
         for gcmap in self.allocated_gcmaps:
             lltype.free(gcmap, flavor="raw")
 
@@ -1036,6 +1039,7 @@ class CompiledBlockASMJS(object):
         #os.write(2, "====\n")
         self.pos = 0
         while self.pos < len(self.operations):
+            #os.write(2, "  GENERATING OP #%d\n" % (self.pos,))
             op = self.operations[self.pos]
             step = 1
             # Flush any suspended expressions that would be invalidated by this
@@ -1153,9 +1157,10 @@ class CompiledBlockASMJS(object):
                     self.box_expression_graveyard[jitval] = boxexpr
                     return boxexpr
                 except KeyError:
-                    #os.write(2, "UNINITIAlIZED BOX: %s\n" % (jitval,))
-                    #if jitval in self.box_expression_graveyard:
-                    #    os.write(2, "  BOX EXPR WAS ALREADY CONSUMED\n")
+                    os.write(2, "UNINITIALIZED BOX: %s\n" % (jitval,))
+                    if jitval in self.box_expression_graveyard:
+                        os.write(2, "  BOX EXPR WAS ALREADY CONSUMED\n")
+                    os.write(2, self.bldr.finish() + "\n")
                     raise ValueError("Uninitialized box")
         return jitval
 
@@ -1263,6 +1268,8 @@ class CompiledBlockASMJS(object):
             return False
         if op.getopnum() == rop.INT_FORCE_GE_ZERO:
             return False
+        if op.getopnum() == rop.INT_SIGNEXT:
+            return False
         if op.getopnum() == rop.FLOAT_ABS:
             return False
         if op.result.type == FLOAT:
@@ -1275,24 +1282,6 @@ class CompiledBlockASMJS(object):
             if op.getopnum() == rop.GETARRAYITEM_RAW_PURE:
                 return False
         return True
-
-    def _genop_write_output_args(self, outputargs, locations=None):
-        if locations is None:
-            locations = self._get_frame_locations(outputargs)
-        assert len(outputargs) == len(locations)
-        self.bldr.emit_comment("WRITE %d OUTPUT ARGS" % (len(outputargs),))
-        with ctx_spill_to_frame(self):
-            for i in xrange(len(outputargs)):
-                box = outputargs[i]
-                offset = locations[i]
-                curval = self.spilled_frame_values.get(offset, None)
-                if curval is not None:
-                    if SANITYCHECK:
-                        assert curval == box
-                else:
-                    self._genop_spill_to_frame(box, offset)
-            self._genop_store_gcmap()
-        return locations
 
     def _get_frame_locations(self, arguments, offset=-1):
         """Allocate locations in the frame for all the given arguments."""
@@ -1473,6 +1462,12 @@ class CompiledBlockASMJS(object):
 
     genop_setfield_raw = genop_setfield_gc
 
+    def genop_zero_ptr_field(self, op):
+        base = self._get_jsval(op.getarg(0))
+        offset = self._get_jsval(op.getarg(1))
+        addr = js.Plus(base, offset)
+        self.bldr.emit_store(js.zero, addr, js.Int32)
+
     def genop_getinteriorfield_gc(self, op):
         t = unpack_interiorfielddescr(op.getdescr())
         offset, itemsize, fieldsize, signed = t
@@ -1561,6 +1556,18 @@ class CompiledBlockASMJS(object):
         addr = js.Plus(base, itemoffset)
         typ = js.HeapType.from_size_and_sign(itemsize, signed)
         self.bldr.emit_store(value, addr, typ)
+
+    def genop_zero_array(self, op):
+        itemsize, baseofs, _ = unpack_arraydescr(op.getdescr())
+        base = self._get_jsval(op.getarg(0))
+        offset = self._get_jsval(op.getarg(1))
+        length = self._get_jsval(op.getarg(2))
+        # XXX TODO: check correct meaning of fields here
+        startaddr = js.Plus(base,
+                            js.Plus(js.ConstInt(baseofs),
+                                    js.IMul(offset, js.ConstInt(itemsize))))
+        nbytes = js.IMul(length, js.ConstInt(itemsize))
+        self.bldr.emit_expr(js.CallFunc("memset", [startaddr, js.zero, nbytes]))
 
     def _genop_expr_int_unaryop(operator):
         def genop_expr_int_unaryop(self, op):
@@ -1685,6 +1692,27 @@ class CompiledBlockASMJS(object):
         with self.bldr.emit_else_block():
             self.bldr.emit_assignment(resvar, arg)
 
+    def genop_int_signext(self, op):
+        value = self._get_jsval(op.getarg(0))
+        numbytesbox = op.getarg(1)
+        assert isinstance(numbytesbox, ConstInt)
+        numbytes = numbytesbox.getint()
+        resvar = self._allocate_box_variable(op.result)
+        # We can only sign-extend for 8-bit or 16-bit into 32-bit.
+        if numbytes == 1:
+            lowbytes = js.And(value, js.ConstInt(0xFF))
+            highbytes = js.ConstInt(-256)
+            signbit = js.And(value, js.ConstInt(0x80))
+        elif numbytes == 2:
+            lowbytes = js.And(value, js.ConstInt(0xFFFF))
+            highbytes = js.ConstInt(-65536)
+            signbit = js.And(value, js.ConstInt(0x8000))
+        else:
+            raise ValueError("invalid number of bytes to signext")
+        self.bldr.emit_assignment(resvar, lowbytes)
+        with self.bldr.emit_if_block(signbit):
+            self.bldr.emit_assignment(resvar, js.Plus(resvar, highbytes))
+
     genop_expr_ptr_eq = genop_expr_int_eq
     genop_expr_ptr_ne = genop_expr_int_ne
     genop_expr_instance_ptr_eq = genop_expr_ptr_eq
@@ -1750,21 +1778,6 @@ class CompiledBlockASMJS(object):
     def genop_expr_cast_int_to_float(self, op):
         return js.DoubleCast(self._get_jsval(op.getarg(0)))
 
-    def genop_read_timestamp(self, op):
-        # Simulate processor time using gettimeofday().
-        # XXX TODO: Probably this is all sorts of technically incorrect.
-        # It needs to write into the heap, so we use the frame as scratch.
-        os.write(2, "WARNING: genop_read_timestamp probably doesn't work\n")
-        self.clt.func.ensure_frame_depth(2*WORD)
-        addr = js.FrameSlotAddr(0)
-        self.bldr.emit_expr(js.CallFunc("gettimeofday", [addr]))
-        secs = js.HeapData(js.Int32, addr)
-        micros = js.HeapData(js.Int32, js.FrameSlotAddr(WORD))
-        millis = js.Div(micros, js.ConstInt(1000))
-        millis = js.Plus(millis, js.IMul(secs, js.ConstInt(1000)))
-        boxvar = self._allocate_box_variable(op.result)
-        self.bldr.emit_assignment(boxvar, millis)
-
     #
     # Calls and Jumps and Exits, Oh My!
     #
@@ -1779,6 +1792,8 @@ class CompiledBlockASMJS(object):
         oopspecindex = effectinfo.oopspecindex
         if oopspecindex == EffectInfo.OS_MATH_SQRT:
             self._genop_math_sqrt(op)
+        elif oopspecindex == EffectInfo.OS_MATH_READ_TIMESTAMP:
+            self._genop_math_read_timestamp(op)
         else:
             addr = self._get_jsval(op.getarg(0))
             args = []
@@ -1834,9 +1849,15 @@ class CompiledBlockASMJS(object):
         descr = op.getdescr()
         assert isinstance(descr, CallDescr)
         assert op.numargs() == len(descr.arg_classes) + 1
-        addr = self._get_jsval(op.getarg(0))
+        # We don't support any errno-saving stuff, yet...
+        saveerr = op.getarg(0)
+        assert isinstance(saveerr, ConstInt)
+        if saveerr.getint() != 0:
+            os.write(2, "WARNING: errno-saving not supported yet")
+            raise RuntimeError("errno-saving not supported yet")
+        fnaddr = self._get_jsval(op.getarg(1))
         args = []
-        i = 1
+        i = 2
         while i < op.numargs():
             args.append(self._get_jsval(op.getarg(i)))
             i += 1
@@ -1845,7 +1866,9 @@ class CompiledBlockASMJS(object):
         with ctx_guard_not_forced(self, guardop):
             with ctx_allow_gc(self):
                 self.bldr.emit_expr(js.DynCallFunc("v", release_addr, []))
-                self._genop_call(op, descr, addr, args)
+                # write_real_errno(saveerr)
+                self._genop_call(op, descr, fnaddr, args)
+                # read_real_errno(saveerr)
                 self.bldr.emit_expr(js.DynCallFunc("v", reacquire_addr, []))
 
     def genop_withguard_call_assembler(self, op, guardop):
@@ -1932,7 +1955,7 @@ class CompiledBlockASMJS(object):
             # Cleanup.
             self.bldr.free_intvar(resvar)
 
-    def _genop_call(self, op, descr, addr, args):
+    def _genop_call(self, op, descr, fnaddr, args):
         assert isinstance(descr, CallDescr)
         assert len(descr.arg_classes) == len(args)
         # Map CallDescr type tags into dynCall type tags.
@@ -1943,7 +1966,7 @@ class CompiledBlockASMJS(object):
             callsig += sigmap[descr.arg_classes[i]]
             i += 1
         with ctx_allow_gc(self, exclude=[op.result]):
-            call = js.DynCallFunc(callsig, addr, args)
+            call = js.DynCallFunc(callsig, fnaddr, args)
             if op.result is None:
                 self.bldr.emit_expr(call)
             else:
@@ -1961,6 +1984,21 @@ class CompiledBlockASMJS(object):
         arg = js.DoubleCast(self._get_jsval(op.getarg(1)))
         res = self._allocate_box_variable(op.result)
         self.bldr.emit_assignment(res, js.CallFunc("sqrt", [arg]))
+
+    def _genop_math_read_timestamp(self, op):
+        # Simulate processor time using gettimeofday().
+        # XXX TODO: Probably this is all sorts of technically incorrect.
+        # It needs to write into the heap, so we use the frame as scratch.
+        os.write(2, "WARNING: genop_read_timestamp probably doesn't work\n")
+        self.clt.func.ensure_frame_depth(2*WORD)
+        addr = js.FrameSlotAddr(0)
+        self.bldr.emit_expr(js.CallFunc("gettimeofday", [addr]))
+        secs = js.HeapData(js.Int32, addr)
+        micros = js.HeapData(js.Int32, js.FrameSlotAddr(WORD))
+        millis = js.Div(micros, js.ConstInt(1000))
+        millis = js.Plus(millis, js.IMul(secs, js.ConstInt(1000)))
+        boxvar = self._allocate_box_variable(op.result)
+        self.bldr.emit_assignment(boxvar, millis)
 
     def genop_force_token(self, op):
         if op.result is not None:
@@ -2083,14 +2121,30 @@ class CompiledBlockASMJS(object):
         self._prepare_guard_op(op, faillocs)
 
     def genop_finish(self, op):
-        descr = op.getdescr()
-        descr = cast_instance_to_gcref(descr)
-        rgc._make_sure_does_not_move(descr)
         # Write return value into the frame.
-        self._genop_write_output_args(op.getarglist())
+        if op.numargs() > 0:
+            assert op.numargs() == 1
+            result = op.getarg(0)
+            self.bldr.emit_comment("WRITE RESULT")
+            with ctx_spill_to_frame(self):
+                # XXX TODO: wtf is up with force_spill anyway?
+                offset = 0 #self.forced_spill_frame_offset
+                curval = self.spilled_frame_values.get(offset, None)
+                if False and curval is not None:
+                    if SANITYCHECK:
+                        assert curval == result
+                else:
+                    self._genop_spill_to_frame(result, offset)
+                self._genop_store_gcmap()
         # Write the descr into the frame slot.
+        descr = op.getdescr()
         addr = js.FrameDescrAddr()
-        self.bldr.emit_store(js.ConstPtr(descr), addr, js.Int32)
+        if descr is None:
+            self.bldr.emit_store(js.zero, addr, js.Int32)
+        else:
+            gcdescr = cast_instance_to_gcref(descr)
+            rgc._make_sure_does_not_move(gcdescr)
+            self.bldr.emit_store(js.ConstPtr(gcdescr), addr, js.Int32)
         self.bldr.emit_exit()
 
     #

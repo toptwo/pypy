@@ -205,6 +205,7 @@ class AbstractLLCPU(AbstractCPU):
         return deadframe.jf_savedata
 
     def free_loop_and_bridges(self, compiled_loop_token):
+        raise RuntimeError("FREE LOOP AND BRIDGES")
         AbstractCPU.free_loop_and_bridges(self, compiled_loop_token)
         blocks = compiled_loop_token.asmmemmgr_blocks
         if blocks is not None:

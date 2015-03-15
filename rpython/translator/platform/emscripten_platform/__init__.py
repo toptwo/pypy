@@ -143,8 +143,11 @@ class EmscriptenPlatform(BasePosix):
             cfiles, eci, exe_name, path, shared,
             headers_to_precompile, no_precompile_cfiles,
         )
-        ldflags = m.lines[m.defs["LDFLAGS"]].value
-        cflags = m.lines[m.defs["CFLAGS"]].value
+        # We want to mutate the flags, so convert from tuples to lists.
+        ldflags = list(m.lines[m.defs["LDFLAGS"]].value)
+        cflags = list(m.lines[m.defs["CFLAGS"]].value)
+        m.lines[m.defs["LDFLAGS"]].value = ldflags
+        m.lines[m.defs["CFLAGS"]].value = cflags
         # Find what debug level we're linking at, based on environ flags.
         debug_level = 0
         for flag in ldflags:
@@ -163,11 +166,14 @@ class EmscriptenPlatform(BasePosix):
             cflags.insert(1, incl)
         # Export only the entry-point functions, plus a few generally-useful
         # helper functions.
-        # XXX TODO: also need to export jitInvoke, maybe some emjs_* helpers.
+        # XXX TODO: need a way to get at entry-point names.
+        # We may have to grep forwarddecl.h for PY_EXPORTED
         idx = ldflags.index("EXPORT_ALL=1")
         del ldflags[idx - 1 : idx + 1]
-        exports = ("main", "free", "jitInvoke", "emjs_make_handle", "emjs_free")
-        exports = exports + eci.export_symbols
+        exports = ("main", "free", "jitInvoke", "emjs_make_handle",
+                   "emjs_free", "rpython_startup_code", "entry_point",
+                   "pypy_setup_home", "pypy_execute_source",
+                   "pypy_g_entry_point" )
         exports = repr(["_" + nm for nm in exports])
         ldflags.extend([
             "-s", repr("EXPORTED_FUNCTIONS=%s" % (exports,)),

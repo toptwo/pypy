@@ -48,7 +48,8 @@ def jsexternal(args, result, **kwds):
     return do_register
 
 
-_jitCompiledFunctions = {0: None}
+_jitCompiledFunctions = { 0: None }
+_jitNextFuncId = 1
 
 
 @jsexternal([rffi.CCHARP], rffi.INT)
@@ -60,7 +61,9 @@ def jitCompile(jssource):
 
 @jsexternal([], rffi.INT)
 def jitReserve():
-    funcid = len(_jitCompiledFunctions)
+    global _jitNextFuncId
+    funcid = _jitNextFuncId
+    _jitNextFuncId += 1
     _jitCompiledFunctions[funcid] = None
     return funcid
 
@@ -96,12 +99,7 @@ def jitInvoke(funcid, frame, label):
 
 @jsexternal([rffi.INT], lltype.Void)
 def jitFree(funcid):
-    _jitCompiledFunctions[funcid] = None
-    while funcid and len(_jitCompiledFunctions) == funcid + 1:
-        if _jitCompiledFunctions[funcid] is not None:
-            break
-        del _jitCompiledFunctions[funcid]
-        funcid -= 1
+    _jitCompiledFunctions.pop(funcid, None)
 
 
 # Here we have a simple and slow asmjs-to-python converter.
