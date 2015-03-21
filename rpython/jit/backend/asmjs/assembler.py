@@ -1848,7 +1848,7 @@ class CompiledBlockASMJS(object):
     def genop_withguard_call_release_gil(self, op, guardop):
         descr = op.getdescr()
         assert isinstance(descr, CallDescr)
-        assert op.numargs() == len(descr.arg_classes) + 1
+        assert op.numargs() == len(descr.arg_classes) + 2
         # We don't support any errno-saving stuff, yet...
         saveerr = op.getarg(0)
         assert isinstance(saveerr, ConstInt)

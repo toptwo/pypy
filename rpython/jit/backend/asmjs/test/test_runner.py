@@ -44,6 +44,12 @@ class TestASMJSRunner(LLtypeBackendTest):
     def test_compile_asmlen(self):
         py.test.skip("not relevant for asmjs?")
 
+    def test_call_to_c_function(self):
+        py.test.xfail("XXX TODO libffi calls not implemented yet")
+
+    def test_call_to_c_function_with_callback(self):
+        py.test.xfail("XXX TODO libffi callbacks not implemented yet")
+
     def test_execute_ptr_operation(self):
         cpu = self.cpu
         u = lltype.malloc(U)
