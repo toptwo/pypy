@@ -1,6 +1,6 @@
 
 function ffi_type_allocator(size, alignment, type) {
-  return "allocate([0,0,0," + size + ",0," + alignment + ",0," + type + "], 'i8', ALLOC_STATIC)"
+  return "allocate([" + size + ",0,0,0," + alignment + ",0," + type + ",0], 'i8', ALLOC_STATIC)"
 }
 
 var LibraryFFI = {
