@@ -669,10 +669,11 @@ class CompiledBlockASMJS(object):
         reflocs = []
         offset = 0
         baseofs = self.cpu.get_baseofs_of_frame_field()
+        # XXX TODO: check that it's float-size-aligned
         for i in xrange(len(inputargs)):
             box = inputargs[i]
             typ = js.HeapType.from_box(box)
-            alignment = (baseofs + offset) % typ.size
+            alignment = offset % typ.size
             if alignment:
                 offset += typ.size - alignment
             self.inputlocs[i] = offset
@@ -989,7 +990,7 @@ class CompiledBlockASMJS(object):
             if kind == HOLE:
                 continue
             typ = js.HeapType.from_kind(kind)
-            alignment = (baseofs + offset) % typ.size
+            alignment = offset % typ.size
             if alignment:
                 offset += typ.size - alignment
             locations[i] = offset
@@ -1292,7 +1293,7 @@ class CompiledBlockASMJS(object):
         for i in xrange(len(arguments)):
             box = arguments[i]
             typ = js.HeapType.from_box(box)
-            alignment = (baseofs + offset) % typ.size
+            alignment = offset % typ.size
             if alignment:
                 offset += typ.size - alignment
             locations[i] = offset
@@ -1308,7 +1309,7 @@ class CompiledBlockASMJS(object):
         # Align each value to a multiple of its size.
         if offset == -1:
             offset = self.spilled_frame_offset
-            alignment = (baseofs + offset) % typ.size
+            alignment = offset % typ.size
             if alignment:
                 offset += typ.size - alignment
         if offset + typ.size > self.spilled_frame_offset:
@@ -1945,9 +1946,12 @@ class CompiledBlockASMJS(object):
                     dwtf = cpu.done_with_this_frame_descr_float
                 else:
                     raise AssertionError(kind)
-            gcref = cast_instance_to_gcref(dwtf)
-            rgc._make_sure_does_not_move(gcref)
-            dwtf = js.ConstInt(rffi.cast(lltype.Signed, gcref))
+            if not dwtf:
+                dwtf = js.zero
+            else:
+                gcref = cast_instance_to_gcref(dwtf)
+                rgc._make_sure_does_not_move(gcref)
+                dwtf = js.ConstInt(rffi.cast(lltype.Signed, gcref))
             with self.bldr.emit_if_block(js.Equal(resdescr, dwtf)):
                 # If so, then we're on the happy fast path.
                 # Reset the vable token  (whatever the hell that means...)
@@ -2522,6 +2526,12 @@ class CompiledBlockASMJS(object):
         self.bldr.emit_comment("FORCE SPILL: %s" % (op,))
         self._genop_spill_to_frame(op.getarg(0))
         self.forced_spill_frame_offset = self.spilled_frame_offset
+
+    def genop_increment_debug_counter(self, op):
+        # Argument is an address; increment its contents.
+        addr = self._get_jsval(op.getarg(0))
+        newval = js.Plus(js.HeapData(js.UInt32, addr), js.ConstInt(1))
+        self.bldr.emit_store(newval, addr, js.UInt32)
 
     def not_implemented_op_withguard(self, op, guardop):
         self.not_implemented_op(op)

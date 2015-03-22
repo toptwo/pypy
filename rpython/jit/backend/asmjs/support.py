@@ -802,6 +802,9 @@ class FOREIGN(object):
     def _memcpy(self, dst, src, size):
         return self._heap.memmove(dst, src, size)
 
+    def _memset(self, dst, c, count):
+        return self._heap.memset(dst, c, count)
+
     def _gettimeofday(self, ptr):
         raise NotImplementedError
 
@@ -863,6 +866,10 @@ class NativeHeap(object):
         dst = self.validate_addr(dst)
         src = self.validate_addr(src)
         return ctypes.memmove(dst, src, int(size))
+
+    def memset(self, dst, c, count):
+        dst = self.validate_addr(dst)
+        return ctypes.memset(dst, int(c), int(count))
 
     def __getitem__(self, addr):
         return ctypes.string_at(self.validate_addr(addr), 1)
