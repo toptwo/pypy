@@ -50,6 +50,12 @@ class TestASMJSRunner(LLtypeBackendTest):
     def test_call_to_c_function_with_callback(self):
         py.test.xfail("XXX TODO libffi callbacks not implemented yet")
 
+    def test_compile_bridge_while_running(self):
+        py.test.xfail("XXX TODO can't bridge from running code yet")
+
+    def test_compile_bridge_while_running_guard_no_exc(self):
+        py.test.xfail("XXX TODO can't bridge from running code yet")
+
     def test_execute_ptr_operation(self):
         cpu = self.cpu
         u = lltype.malloc(U)
