@@ -58,7 +58,7 @@ class ASMJSBuilder(object):
         for helper_chunks in self.helper_functions.itervalues():
             chunks.extend(helper_chunks)
         # The function definition, including variable declarations.
-        chunks.append('function F(frame, label){\n')
+        chunks.append('function F(frame, tladdr, label){\n')
         chunks.append('frame=frame|0;\n')
         chunks.append('label=label|0;\n')
         for var in self.all_intvars:

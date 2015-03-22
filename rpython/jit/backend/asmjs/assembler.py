@@ -5,7 +5,7 @@ import time
 from rpython.rlib import rgc
 from rpython.rlib.rarithmetic import r_uint, intmask
 from rpython.rlib.objectmodel import we_are_translated
-from rpython.jit.backend.llsupport import symbolic, jitframe, rewrite
+from rpython.jit.backend.llsupport import symbolic, jitframe, rewrite, llerrno
 from rpython.jit.backend.llsupport.regalloc import compute_vars_longevity
 from rpython.jit.backend.llsupport.descr import (unpack_fielddescr,
                                                  unpack_arraydescr,
@@ -279,7 +279,7 @@ class CompiledFuncASMJS(object):
                 assert clt is not None
                 funcid = js.ConstInt(clt.func.compiled_funcid)
                 loopid = js.ConstInt(clt.compiled_loopid)
-                callargs = [funcid, js.frame, loopid]
+                callargs = [funcid, js.frame, js.tladdr, loopid]
                 call = js.CallFunc("jitInvoke", callargs)
                 bldr.emit_assignment(js.frame, call)
                 bldr.emit_exit()
@@ -291,7 +291,7 @@ class CompiledFuncASMJS(object):
                             with bldr.emit_case_block(js.ConstInt(i)):
                                 funcid = js.ConstInt(clt.func.compiled_funcid)
                                 loopid = js.ConstInt(clt.compiled_loopid)
-                                callargs = [funcid, js.frame, loopid]
+                                callargs = [funcid, js.frame, js.tladdr, loopid]
                                 call = js.CallFunc("jitInvoke", callargs)
                                 bldr.emit_assignment(js.frame, call)
                                 bldr.emit_exit()
@@ -1849,12 +1849,9 @@ class CompiledBlockASMJS(object):
         descr = op.getdescr()
         assert isinstance(descr, CallDescr)
         assert op.numargs() == len(descr.arg_classes) + 2
-        # We don't support any errno-saving stuff, yet...
-        saveerr = op.getarg(0)
-        assert isinstance(saveerr, ConstInt)
-        if saveerr.getint() != 0:
-            os.write(2, "WARNING: errno-saving not supported yet")
-            raise RuntimeError("errno-saving not supported yet")
+        saveerrbox = op.getarg(0)
+        assert isinstance(saveerrbox, ConstInt)
+        save_err = saveerrbox.getint()
         fnaddr = self._get_jsval(op.getarg(1))
         args = []
         i = 2
@@ -1865,10 +1862,45 @@ class CompiledBlockASMJS(object):
         reacquire_addr = js.ConstInt(self.clt.assembler.reacquire_gil_addr)
         with ctx_guard_not_forced(self, guardop):
             with ctx_allow_gc(self):
+                # Release the GIL.
                 self.bldr.emit_expr(js.DynCallFunc("v", release_addr, []))
-                # write_real_errno(saveerr)
+                # If necessary, restore our local copy into the real 'errno'.
+                if save_err & rffi.RFFI_READSAVED_ERRNO:
+                    rpy_errno_ofs = llerrno.get_rpy_errno_offset(self.cpu)
+                    p_errno_ofs = llerrno.get_p_errno_offset(self.cpu)
+                    errno = js.HeapData(
+                        js.Int32,
+                        js.Plus(js.tladdr, js.ConstInt(rpy_errno_ofs))
+                    )
+                    errno_addr = js.HeapData(
+                        js.Int32,
+                        js.Plus(js.tladdr, js.ConstInt(p_errno_ofs))
+                    )
+                    self.bldr.emit_store(errno, errno_addr, js.Int32)
+                # If necessary, zero out the real 'errno'.
+                elif save_err & rffi.RFFI_ZERO_ERRNO_BEFORE:
+                    p_errno_ofs = llerrno.get_p_errno_offset(self.cpu)
+                    errno_addr = js.HeapData(
+                        js.Int32,
+                        js.Plus(js.tladdr, js.ConstInt(p_errno_ofs))
+                    )
+                    self.bldr.emit_store(js.zero, errno_addr, js.Int32)
+                # Do the actual call.
                 self._genop_call(op, descr, fnaddr, args)
-                # read_real_errno(saveerr)
+                # If necessary, read the real 'errno' and save a local copy.
+                if save_err & rffi.RFFI_SAVE_ERRNO:
+                    # XXX TODO:  will this all "just work" when translated?
+                    rpy_errno_ofs = llerrno.get_rpy_errno_offset(self.cpu)
+                    p_errno_ofs = llerrno.get_p_errno_offset(self.cpu)
+                    errno = js.HeapData(
+                        js.Int32,
+                        js.HeapData(js.Int32, js.Plus(
+                            js.tladdr, js.ConstInt(p_errno_ofs)
+                        ))
+                    )
+                    save_addr = js.Plus(js.tladdr, js.ConstInt(rpy_errno_ofs))
+                    self.bldr.emit_store(errno, save_addr, js.Int32)
+                # Re-acquire the GIL.
                 self.bldr.emit_expr(js.DynCallFunc("v", reacquire_addr, []))
 
     def genop_withguard_call_assembler(self, op, guardop):
@@ -1893,7 +1925,7 @@ class CompiledBlockASMJS(object):
             loopid = js.ConstInt(target_clt.compiled_loopid)
             resvar = self.bldr.allocate_intvar()
             with ctx_allow_gc(self):
-                callargs = [funcid, frame, loopid]
+                callargs = [funcid, frame, js.tladdr, loopid]
                 call = js.CallFunc("jitInvoke", callargs)
                 self.bldr.emit_assignment(resvar, call)
             # Load the descr resulting from that call.

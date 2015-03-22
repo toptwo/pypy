@@ -706,6 +706,7 @@ class DynCallFunc(_CallFunc):
 
 
 frame = IntVar("frame")
+tladdr = IntVar("tladdr")
 label = IntVar("label")
 
 

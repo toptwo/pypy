@@ -116,13 +116,14 @@ var LibraryJIT = {
   // If you pass an id that does not have compiled code associated with it,
   // it will produce a return value of zero.
   //
-  jitInvoke: function(id, frame, label) {
+  jitInvoke: function(id, frame, tladdr, label) {
     id = id|0;
     label = label|0;
     frame = frame|0;
+    tladdr = tladdr|0;
     var func = Module._jitCompiledFunctions[id];
     if (func) {
-        return func(frame, label)|0;
+        return func(frame, tladdr, label)|0;
     } else {
         return 0|0;
     }

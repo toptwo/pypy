@@ -1,6 +1,7 @@
 
 from rpython.rlib.unroll import unrolling_iterable
-from rpython.rtyper.lltypesystem import lltype, llmemory
+from rpython.rtyper.lltypesystem import lltype, llmemory, rffi
+from rpython.rtyper.lltypesystem.lloperation import llop
 from rpython.rtyper.llinterp import LLInterpreter
 from rpython.jit.backend.llsupport.llmodel import AbstractLLCPU
 from rpython.jit.metainterp import history
@@ -92,9 +93,18 @@ class CPU_ASMJS(AbstractLLCPU):
                     else:
                         assert kind == history.REF
                         self.set_ref_value(ll_frame, num, arg)
+                llop.gc_writebarrier(lltype.Void, ll_frame)
+                # Send the threadlocaladdr.
+                if self.translate_support_code:
+                    ll_tlref = llop.threadlocalref_addr(
+                        llmemory.Address)
+                else:
+                    ll_tlref = rffi.cast(llmemory.Address,
+                        self._debug_errno_container)
                 # Invoke it via the helper.
                 ll_frameadr = self.cast_ptr_to_int(ll_frame)
-                ll_frameadr = support.jitInvoke(funcid, ll_frameadr, loopid)
+                ll_tladdr = self.cast_adr_to_int(ll_tlref)
+                ll_frameadr = support.jitInvoke(funcid, ll_frameadr, ll_tladdr, loopid)
                 ll_frame = self.cast_int_to_ptr(ll_frameadr, llmemory.GCREF)
             finally:
                 if not self.translate_support_code:

@@ -86,14 +86,14 @@ def jitCopy(srcId, dstId):
     _jitCompiledFunctions[dstId] = _jitCompiledFunctions[srcId]
 
 
-@jsexternal([rffi.INT, rffi.INT, rffi.INT], rffi.INT,
+@jsexternal([rffi.INT, rffi.INT, rffi.INT, rffi.INT], rffi.INT,
             _nowrapper=True, random_effects_on_gcobjs=True)
-def jitInvoke(funcid, frame, label):
+def jitInvoke(funcid, frame, tladdr, label):
     func = _jitCompiledFunctions.get(funcid, None)
     if func is None:
         res = 0
     else:
-        res = int(func(frame, label))
+        res = int(func(frame, tladdr, label))
     return res
 
 
