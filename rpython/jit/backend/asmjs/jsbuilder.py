@@ -60,6 +60,7 @@ class ASMJSBuilder(object):
         # The function definition, including variable declarations.
         chunks.append('function F(frame, tladdr, label){\n')
         chunks.append('frame=frame|0;\n')
+        chunks.append('tladdr=tladdr|0;\n')
         chunks.append('label=label|0;\n')
         for var in self.all_intvars:
             chunks.append("var %s=0;\n" % (var.varname,))
