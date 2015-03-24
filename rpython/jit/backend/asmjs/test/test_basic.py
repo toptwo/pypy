@@ -16,12 +16,6 @@ class JitASMJSMixin(support.LLJitMixin):
 
 class TestBasic(JitASMJSMixin, test_ajit.BaseLLtypeTests):
 
-    def tearDown(self):
-        import gc; gc.collect()
-        print "\n\n\nOMG HERE I AM\n\n\n\n"
-        raise RuntimeError(gc.garbage)
-        super(TestBasic, self).tearDown()
-
     def test_r_dict(self):
         # a Struct that belongs to the hash table is not seen as being
         # included in the larger Array
