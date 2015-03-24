@@ -164,17 +164,20 @@ class EmscriptenPlatform(BasePosix):
             incl = os.path.join(os.path.dirname(__file__), "no-debug")
             cflags.insert(0, "-I")
             cflags.insert(1, incl)
-        # Export only the entry-point functions, plus a few generally-useful
-        # helper functions.
-        # XXX TODO: need a way to get at entry-point names.
+        # Export all the entry-point functions, plus a few generally-useful
+        # helper functions.  Unfortunately there's no nice API for getting
+        # their names, so we search for RPY_EXPORTED symbols in known files.
         # We may have to grep forwarddecl.h for PY_EXPORTED
+        exports = ["main", "free", "jitInvoke", "emjs_make_handle",
+                   "emjs_free", "pypy_g_entry_point"]
+        with m.makefile_dir.join("forwarddecl.h").open("r") as decls:
+            for ln in decls:
+                if ln.startswith("RPY_EXPORTED "):
+                    name = ln.strip().split(None, 2)[-1].split("(", 1)[0]
+                    exports.append(name)
+        exports = repr(["_" + nm for nm in exports])
         idx = ldflags.index("EXPORT_ALL=1")
         del ldflags[idx - 1 : idx + 1]
-        exports = ("main", "free", "jitInvoke", "emjs_make_handle",
-                   "emjs_free", "rpython_startup_code", "entry_point",
-                   "pypy_setup_home", "pypy_execute_source",
-                   "pypy_g_entry_point" )
-        exports = repr(["_" + nm for nm in exports])
         ldflags.extend([
             "-s", repr("EXPORTED_FUNCTIONS=%s" % (exports,)),
         ])
