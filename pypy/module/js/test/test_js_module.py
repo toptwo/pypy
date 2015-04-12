@@ -35,6 +35,21 @@ class AppTestJS(object):
         assert isinstance(js.convert(cls.meth), js.Function)
         assert isinstance(js.convert(cls().meth), js.Function)
 
+    def test_py_to_js_dict_conversion(self):
+        import js
+        jsobj = js.convert({b'foo': 'bar'})
+        assert isinstance(jsobj, js.Object)
+        assert jsobj.foo == 'bar'
+        jsobj = js.convert({u'foo': 'bar'})
+        assert isinstance(jsobj, js.Object)
+        assert jsobj.foo == 'bar'
+
+    def test_py_to_js_list_conversion(self):
+        import js
+        jsobj = js.convert([1, 2, 3])
+        assert jsobj[0] == 1
+        assert jsobj[1] == 2
+        assert jsobj[2] == 3
 
     def test_js_string(self):
         import js

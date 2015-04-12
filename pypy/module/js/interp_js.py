@@ -17,7 +17,7 @@ from pypy.module.js import support
 class W_Value(W_Root):
     """Base class for js value handles.
 
-    This is the base class for wrappe javascript value handles.  It cannot
+    This is the base class for wrapped javascript value handles.  It cannot
     be instantiated directly from application code, but provides much of
     the base functionality that's common to all value types.
     """
@@ -773,6 +773,37 @@ def _convert(space, w_value):
         # Can we convert from raw in-memory repr direct to JS string?
         value = space.unicode_w(w_value).encode("utf-8")
         return W_String(support.emjs_make_strn(value, len(value)))
+    if space.isinstance_w(w_value, space.w_dict):
+        obj = W_Object(support.emjs_make_object())
+        w_items = space.call_method(w_value, 'items')
+        w_iter = space.iter(w_items)
+        while True:
+            try:
+                w_tup = space.next(w_iter)
+                w_key = space.getitem(w_tup, space.newint(0))
+                w_value = space.getitem(w_tup, space.newint(1))
+                space.setattr(obj, w_key, w_value)
+            except OperationError as e:
+                if not e.match(space, space.w_StopIteration):
+                    raise
+                else:
+                    break
+        return obj
+    if space.isinstance_w(w_value, space.w_list):
+        lst = W_Array(support.emjs_make_array(space.int_w(space.len(w_value))))
+        w_iter = space.iter(w_value)
+        i = 0
+        while True:
+            try:
+                w_item = space.next(w_iter)
+                space.setitem(lst, space.newint(i), w_item)
+                i += 1
+            except OperationError as e:
+                if not e.match(space, space.w_StopIteration):
+                    raise
+                else:
+                    break
+        return lst
     # XXX TODO: is this typecheck safe and accurate?
     if isinstance(w_value, pypy.interpreter.function.Function):
         args = pypy.interpreter.function.Arguments(space, [])
