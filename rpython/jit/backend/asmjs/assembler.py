@@ -1150,19 +1150,20 @@ class CompiledBlockASMJS(object):
 
     def _get_jsval(self, jitval):
         if isinstance(jitval, Box):
-            try:
-                return self.box_variables[jitval]
-            except KeyError:
-                try:
-                    boxexpr = self.box_expressions.pop(jitval)
-                    self.box_expression_graveyard[jitval] = boxexpr
-                    return boxexpr
-                except KeyError:
-                    os.write(2, "UNINITIALIZED BOX: %s\n" % (jitval,))
-                    if jitval in self.box_expression_graveyard:
-                        os.write(2, "  BOX EXPR WAS ALREADY CONSUMED\n")
-                    os.write(2, self.bldr.finish() + "\n")
-                    raise ValueError("Uninitialized box")
+            boxvar = self.box_variables.get(jitval, None)
+            if boxvar is not None:
+                return boxvar
+            boxexpr = self.box_expressions.get(jitval, None)
+            if boxexpr is not None:
+                self.box_expression_graveyard[jitval] = boxexpr
+                return boxexpr
+            if SANITYCHECK:
+                os.write(2, "UNINITIALIZED BOX: %s\n" % (jitval,))
+                if jitval in self.box_expression_graveyard:
+                    os.write(2, "  BOX EXPR WAS ALREADY CONSUMED\n")
+                os.write(2, self.bldr.finish() + "\n")
+                raise ValueError("Uninitialized box")
+            return None
         return jitval
 
     def _allocate_box_variable(self, box):
