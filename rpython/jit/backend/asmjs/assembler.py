@@ -1153,7 +1153,7 @@ class CompiledBlockASMJS(object):
             boxvar = self.box_variables.get(jitval, None)
             if boxvar is not None:
                 return boxvar
-            boxexpr = self.box_expressions.get(jitval, None)
+            boxexpr = self.box_expressions.pop(jitval, None)
             if boxexpr is not None:
                 self.box_expression_graveyard[jitval] = boxexpr
                 return boxexpr
