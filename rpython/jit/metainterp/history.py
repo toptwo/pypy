@@ -153,7 +153,7 @@ class AbstractFailDescr(AbstractDescr):
 
     _attrs_ = ('adr_jump_offset', 'rd_locs', 'rd_loop_token',
                '_asmjs_block', '_asmjs_faillocs', '_asmjs_failkinds',
-               '_asmjs_hasexc', '_asmjs_gcmap')
+               '_asmjs_failvars', '_asmjs_hasexc', '_asmjs_gcmap')
 
     def handle_fail(self, deadframe, metainterp_sd, jitdriver_sd):
         raise NotImplementedError

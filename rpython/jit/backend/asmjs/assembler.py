@@ -801,12 +801,30 @@ class CompiledBlockASMJS(object):
     def emit_guard_body(self, bldr, faildescr):
         faillocs = faildescr._asmjs_faillocs
         failkinds = faildescr._asmjs_failkinds
-        failvars = self._get_inputvars_from_kinds(failkinds, bldr)
+        failvars = [None] * len(faildescr._asmjs_failvars)
+        inputvars = self._get_inputvars_from_kinds(failkinds, bldr)
+        bldr.emit_comment("GUARD BODY")
+        # Re-allocate the failvars in the current jsbuilder.
+        # This ensures they can be looked up by object identity,
+        # and prevents them being allocated for tempvars.
+        for i in range(len(faildescr._asmjs_failvars)):
+            if failkinds[i] == HOLE:
+                continue
+            varname = faildescr._asmjs_failvars[i].varname
+            if failkinds[i] == FLOAT:
+                failvar = bldr.allocate_doublevar(int(varname[1:]))
+            else:
+                failvar = bldr.allocate_intvar(int(varname[1:]))
+            failvars[i] = failvar
         # If the guard has been compiled into a bridge, emit a local
         # jump to the appropriate label.  Otherwise, spill to frame.
         target_block = faildescr._asmjs_block
         if target_block is not None:
+            # XXX TODO: we know that the guard code will just be inserted
+            # inline here.  There's no need for a jump, and we can have it
+            # read directly from the failvars rather than inputvars.
             bldr.emit_comment("JUMP TO BRIDGED GUARD")
+            self._emit_swap_vars(bldr, failvars, inputvars, failkinds)
             self.clt.func.emit_jump(bldr, target_block.compiled_blockid)
         else:
             # If there might be an exception, capture it to the frame.
@@ -851,12 +869,12 @@ class CompiledBlockASMJS(object):
                         if kind == HOLE:
                             continue
                         typ = js.HeapType.from_kind(kind)
-                        myvar = failvars[i]
+                        myvar = inputvars[i]
                         assert isinstance(myvar, js.Variable)
                         if kind == FLOAT:
                             var = myvar
                         else:
-                            # +2 for descr adn gcmap input args
+                            # +2 for descr and gcmap input args
                             var = hb.allocate_intvar(int(myvar.varname[1:])+2)
                         pos = faillocs[i]
                         hb.emit_store(var, js.FrameSlotAddr(pos), typ)
@@ -2130,6 +2148,32 @@ class CompiledBlockASMJS(object):
                     self.bldr.free_intvar(temp.pop(i))
         seen[i] = 2
 
+    def _emit_swap_vars(self, bldr, invars, outvars, kinds):
+        """Atomically swap the given invars into the given outvars."""
+        assert len(invars) == len(outvars)
+        bldr.emit_comment("SWAPPING INTO %d VARS" % (len(invars),))
+        swapvars = [None] * len(outvars)
+        with ctx_temp_vars(bldr) as tmpvars:
+            for i in range(len(invars)):
+                if kinds[i] == HOLE:
+                    continue
+                # XXX TODO: don't use tempvars if we don't have to.
+                try:
+                    j = outvars.index(invars[i])
+                except ValueError:
+                    swapvars[i] = invars[i]
+                else:
+                    if j == i:
+                        swapvars[i] = invars[i]
+                    else:
+                        swapvars[i] = tmpvars.allocate(kinds[i])
+                        bldr.emit_assignment(swapvars[i], invars[i])
+            for i in range(len(invars)):
+                if kinds[i] == HOLE:
+                    continue
+                if swapvars[i] != outvars[i]:
+                    bldr.emit_assignment(outvars[i], swapvars[i])
+
     def genop_guard_not_forced_2(self, op):
         # This is a special "guard" that is not really a guard, and
         # always appears directly before a FINISH.  It writes some
@@ -2282,15 +2326,26 @@ class CompiledBlockASMJS(object):
         descr = self._prepare_guard_op(op, faillocs)
         failargs = op.getfailargs()
         failkinds = descr._asmjs_failkinds
+        for i in range(len(failargs)):
+            if isinstance(failargs[i], Box):
+                self._genop_flush_box(failargs[i])
         with self.bldr.emit_if_block(test):
-            # Place the failargs into the appropriate inputvars, so that
-            # the dynamically-generated code for the guard can find them.
-            inputvars = self._get_inputvars_from_kinds(failkinds, self.bldr)
-            self._genop_assign_to_vars(failargs, inputvars, failkinds)
-            # Now store all code generated so far into a fragment.
-            # Then we can easily output it at each re-assembly.
-            # This has to be *inside* the if-statement.
-            fragment = self.bldr.capture_fragment()
+            # Place the failargs into a suite of known vars, so that the
+            # dynamically-generated code for the guard can find them.
+            with ctx_temp_vars(self.bldr) as tmpvars:
+                for i in range(len(failargs)):
+                    if failargs[i]:
+                        failval = self._get_jsval(failargs[i])
+                        if isinstance(failval, js.Variable):
+                            descr._asmjs_failvars[i] = failval
+                        else:
+                            failvar = tmpvars.allocate(failkinds[i])
+                            self.bldr.emit_assignment(failvar, failval)
+                            descr._asmjs_failvars[i] = failvar
+                # Now store all code generated so far into a fragment.
+                # Then we can easily output it at each re-assembly.
+                # This has to be *inside* the if-statement.
+                fragment = self.bldr.capture_fragment()
         # Store minimal refs necessary to re-construct the guard failure code.
         self.compiled_fragments.append(fragment)
         self.compiled_descrs.append(descr)
@@ -2306,6 +2361,7 @@ class CompiledBlockASMJS(object):
         gcmap = self.allocate_gcmap_from_kinds(failkinds, faillocs)
         descr._asmjs_failkinds = failkinds
         descr._asmjs_faillocs = faillocs
+        descr._asmjs_failvars = [None] * len(faillocs)
         descr._asmjs_hasexc = self._guard_might_have_exception(op)
         descr._asmjs_gcmap = gcmap
         return descr
@@ -2777,6 +2833,32 @@ class ctx_temp_doublevar(object):
 
     def __exit__(self, exc_typ, exc_val, exc_tb):
         self.bldr.free_doublevar(self.variable)
+
+
+class ctx_temp_vars(object):
+
+    def __init__(self, bldr):
+        self.bldr = bldr
+        self.intvars = []
+        self.doublevars = []
+
+    def __enter__(self):
+        return self
+
+    def allocate(self, kind):
+        if kind == FLOAT:
+            var = self.bldr.allocate_doublevar()
+            self.doublevars.append(var)
+        else:
+            var = self.bldr.allocate_intvar()
+            self.intvars.append(var)
+        return var
+
+    def __exit__(self, exc_typ, exc_val, exc_tb):
+        for var in self.intvars:
+            self.bldr.free_intvar(var)
+        for var in self.doublevars:
+            self.bldr.free_doublevar(var)
 
 
 # Build a dispatch table mapping opnums to the method that emits code for them.

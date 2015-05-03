@@ -9,10 +9,10 @@ from rpython.jit.backend.asmjs.arch import SANITYCHECK
 
 class ASMJSFragment(object):
 
-    def __init__(self, source, num_intvars, num_doublevars, functions):
+    def __init__(self, source, all_intvars, all_doublevars, functions):
         self.source = source
-        self.num_intvars = num_intvars
-        self.num_doublevars = num_doublevars
+        self.all_intvars = all_intvars
+        self.all_doublevars = all_doublevars
         self.imported_functions = functions
 
 
@@ -22,8 +22,8 @@ class ASMJSBuilder(object):
     def __init__(self, cpu):
         self.cpu = cpu
         self.source_chunks = []
-        self.all_intvars = []
-        self.all_doublevars = []
+        self.all_intvars = {}
+        self.all_doublevars = {}
         self.free_intvars = []
         self.free_doublevars = []
         self.imported_functions = {}
@@ -62,9 +62,9 @@ class ASMJSBuilder(object):
         chunks.append('frame=frame|0;\n')
         chunks.append('tladdr=tladdr|0;\n')
         chunks.append('label=label|0;\n')
-        for var in self.all_intvars:
+        for var in self.all_intvars.itervalues():
             chunks.append("var %s=0;\n" % (var.varname,))
-        for var in self.all_doublevars:
+        for var in self.all_doublevars.itervalues():
             chunks.append("var %s=0.0;\n" % (var.varname,))
         return chunks
 
@@ -85,18 +85,25 @@ class ASMJSBuilder(object):
         that variable is re-used; otherwise a fresh variable name is
         allocated and emitted.
         """
-        if num < 0 and len(self.free_intvars) > 0:
-            var = self.free_intvars.pop()
+        if num >= 0:
+            var = self.all_intvars.get(num, None)
+            if var is None:
+                var = jsval.IntVar("i%d" % (num,))
+                self.all_intvars[num] = var
+            else:
+                try:
+                    self.free_intvars.remove(var)
+                except ValueError:
+                    pass
         else:
-            if num < 0:
+            if len(self.free_intvars) > 0:
+                var = self.free_intvars.pop()
+            else:
                 num = len(self.all_intvars)
-            for x in range(len(self.all_intvars), num + 1):
-                self.all_intvars.append(jsval.IntVar("i%d" % (x,)))
-            var = self.all_intvars[num]
-            try:
-                self.free_intvars.remove(var)
-            except ValueError:
-                pass
+                while num in self.all_intvars:
+                    num += 1
+                var = jsval.IntVar("i%d" % (num,))
+                self.all_intvars[num] = var
         return var
 
     def allocate_doublevar(self, num=-1):
@@ -106,18 +113,25 @@ class ASMJSBuilder(object):
         that variable is re-used; otherwise a fresh variable name is
         allocated and emitted.
         """
-        if num < 0 and len(self.free_doublevars) > 0:
-            var = self.free_doublevars.pop()
+        if num >= 0:
+            var = self.all_doublevars.get(num, None)
+            if var is None:
+                var = jsval.DoubleVar("f%d" % (num,))
+                self.all_doublevars[num] = var
+            else:
+                try:
+                    self.free_doublevars.remove(var)
+                except ValueError:
+                    pass
         else:
-            if num < 0:
+            if len(self.free_doublevars) > 0:
+                var = self.free_doublevars.pop()
+            else:
                 num = len(self.all_doublevars)
-            for x in range(len(self.all_doublevars), num + 1):
-                self.all_doublevars.append(jsval.DoubleVar("f%d" % (x,)))
-            var = self.all_doublevars[num]
-            try:
-                self.free_doublevars.remove(var)
-            except ValueError:
-                pass
+                while num in self.all_doublevars:
+                    num += 1
+                var = jsval.DoubleVar("f%d" % (num,))
+                self.all_doublevars[num] = var
         return var
 
     def free_intvar(self, var):
@@ -318,16 +332,18 @@ class ASMJSBuilder(object):
 
     def emit_fragment(self, fragment):
         self.source_chunks.append(fragment.source)
-        for x in range(len(self.all_intvars), fragment.num_intvars):
-            self.all_intvars.append(jsval.IntVar("i%d" % (x,)))
-        for x in range(len(self.all_doublevars), fragment.num_doublevars):
-            self.all_doublevars.append(jsval.DoubleVar("f%d" % (x,)))
+        for x in fragment.all_intvars:
+            if x not in self.all_intvars:
+                self.all_intvars[x] = jsval.IntVar("i%d" % (x,))
+        for x in fragment.all_doublevars:
+            if x not in self.all_doublevars:
+                self.all_doublevars[x] = jsval.DoubleVar("f%d" % (x,))
         self.imported_functions.update(fragment.imported_functions)
 
     def capture_fragment(self):
         fragment = ASMJSFragment("".join(self.source_chunks),
-                                 len(self.all_intvars),
-                                 len(self.all_doublevars),
+                                 list(self.all_intvars),
+                                 list(self.all_doublevars),
                                  self.imported_functions)
         del self.source_chunks[:]
         return fragment
@@ -498,10 +514,10 @@ class ctx_make_helper_func(object):
                 chunks.append("+")
                 chunks.append(self.argvars[i].varname)
                 chunks.append(";\n")
-        for var in self.helper_builder.all_intvars:
+        for var in self.helper_builder.all_intvars.itervalues():
             if var not in self.argvars:
                 chunks.append("var %s=0;\n" % (var.varname,))
-        for var in self.helper_builder.all_doublevars:
+        for var in self.helper_builder.all_doublevars.itervalues():
             if var not in self.argvars:
                 chunks.append("var %s=0.0;\n" % (var.varname,))
         chunks.extend(self.helper_builder.source_chunks)
