@@ -89,7 +89,8 @@ class EmscriptenPlatform(BasePosix):
     ]
 
     cflags = list(emcc_flags) + \
-             [flag.strip() for flag in os.environ.get("CFLAGS", "").split()]
+             [f.strip() for f in os.environ.get("CFLAGS", "").split()] + \
+             [f.strip() for f in os.environ.get("EMCFLAGS", "").split()]
 
     link_flags = list(emcc_flags) + [
       # For compiling with the JIT.
@@ -102,7 +103,8 @@ class EmscriptenPlatform(BasePosix):
       # Disable the use of a separate memory-initializer file.
       # Such file makes it harder to run the compiled code during the build.
       "--memory-init-file", "0",
-    ] + [flag.strip() for flag in os.environ.get("LDFLAGS", "").split()]
+    ] + [f.strip() for f in os.environ.get("LDFLAGS", "").split()] + \
+        [f.strip() for f in os.environ.get("EMLDFLAGS", "").split()]
 
     extra_environ = {
         # Needed when running closure compiler.
