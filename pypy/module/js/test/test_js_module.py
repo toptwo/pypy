@@ -93,3 +93,27 @@ class AppTestJS(object):
         assert a[1] == 2
         assert a[2] == 3
         assert a.length == len(a) == 3
+
+    def test_js_object_iteration(self):
+        import js
+        obj = js.Object()
+        obj["a"] = 1
+        obj["b"] = 2
+        obj["c"] = 3
+        assert sorted(list(obj)) == ["a", "b", "c"]
+
+    def test_js_object_prototype_semantics(self):
+        import js
+        proto = js.Object()
+        proto["z"] = 9
+        obj = js.Object()
+        obj["a"] = 1
+        obj["b"] = 2
+        obj["c"] = 3
+        obj["__proto__"] = proto
+        assert sorted(list(obj)) == ["a", "b", "c"]
+        assert sorted(dir(obj)) == ["a", "b", "c", "z"]
+        assert obj["a"] == 1
+        assert obj["b"] == 2
+        assert obj["c"] == 3
+        assert obj["z"] == 9

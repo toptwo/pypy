@@ -106,12 +106,20 @@ def load_javascript_ctx():
 
         def debug(*args):
             print args
+
+        class Runtime:
+
+            def dynCall(self, callsig, fnptr, args):
+                assert callsig == "iii"
+                return fnptr(*args)
+
     
         ctx.locals.LibraryManager = { "library": {} }
         ctx.locals.Pointer_stringify = Pointer_stringify
         ctx.locals.intArrayFromString = intArrayFromString
         ctx.locals.doSetChar = doSetChar
         ctx.locals.mergeInto = mergeInto
+        ctx.locals.Runtime = Runtime()
         ctx.locals.debug = debug
 
         # Load the library source in this environment.

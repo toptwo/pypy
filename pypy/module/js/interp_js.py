@@ -310,7 +310,6 @@ W_Value.typedef = TypeDef(
     __invert__ = interp2app(W_Value.descr__invert__),
     __contains__ = interp2app(W_Value.descr__contains__),
     # TODO: __hash__, but only for immutable types
-    # TODO: __dir__ and/or __iter__ for object types
 )
 
 
@@ -460,6 +459,20 @@ class W_Object(W_Value):
     def descr__repr__(self, space):
         return space.wrap("<js.Object handle=%d>" % (self.handle,))
 
+    # Iteration over a js.Object is treated roughly like iterating over
+    # a dict, and returns only the own properties of the object.
+
+    def descr__iter__(self, space):
+        return W_OwnPropertiesIterator(self, space)
+
+    # All properties in the object's prototype chain can be enumerated
+    # by doing dir(obj).
+
+    def descr__dir__(self, space):
+        # This must return an actual list.
+        # XXX TODO: a less gross way to obtain said list.
+        return space.wrap(W_AllPropertiesIterator(self, space).keys_w)
+
 
 def W_Object_descr__new__(space, w_subtype):
     w_self = space.allocate_instance(W_Object, w_subtype)
@@ -475,6 +488,8 @@ W_Object.typedef = TypeDef(
     __doc__ = "Handle to a JS object value.",
     __new__ = interp2app(W_Object_descr__new__),
     __repr__ = interp2app(W_Object.descr__repr__),
+    __iter__ = interp2app(W_Object.descr__iter__),
+    __dir__ = interp2app(W_Object.descr__dir__),
 )
 
 
@@ -615,6 +630,81 @@ W_Method.typedef = TypeDef(
 )
 
 
+class W_AbstractIterator(W_Root):
+    """Abstract base class for property iteration."""
+
+    _immutable_fields_ = ['iteratee']
+
+    def __init__(self, w_iteratee, space):
+        self.w_iteratee = w_iteratee
+        self.space = space
+        self.keys_w = []
+        self.idx = -1
+        ll_callback = rffi.llhelper(support.CALLBACK_TP, _gather_callback)
+        dataptr = rffi.cast(rffi.VOIDP, 0)
+        _gather_callback_self[0] = self
+        with _unwrap_handle(space, w_iteratee) as h_iteratee:
+            self._gather_keys(h_iteratee, ll_callback, dataptr)
+        print "GATEHRED", self.keys_w
+        self.space = None
+
+    def _gather_keys(self, h_iteratee, ll_callback, dataptr):
+        raise NotImplementedError
+
+    def descr__repr__(self, space):
+        return space.wrap("<js._Iterator>")
+
+    def descr__iter__(self, space):
+        return self
+
+    def descr__next__(self, space):
+        self.idx += 1
+        if self.idx < len(self.keys_w):
+            return self.keys_w[self.idx]
+        raise OperationError(space.w_StopIteration, space.w_None)
+
+    def descr__length_hint__(self, space):
+        return space.wrap(len(self.keys_w))
+
+
+# XXX TODO: How do I pass W_AbstractIterator instance as a VOID*?
+# For now, we just set it in a global variable, bleh.
+# It works because the keys are gathered via a synchronous call.
+
+_gather_callback_self = [None]
+
+def _gather_callback(dataptr, h_item):
+    iterator = _gather_callback_self[0]
+    iterator.keys_w.append(_wrap_handle(iterator.space, h_item))
+    return 0
+
+
+W_AbstractIterator.typedef = TypeDef(
+    "_Iterator",
+    __doc__ = "Iterator for listing object properties",
+    __iter__ = interp2app(W_AbstractIterator.descr__iter__),
+    next = interp2app(W_AbstractIterator.descr__next__),
+    __next__ = interp2app(W_AbstractIterator.descr__next__),
+    __length_hint__ = interp2app(W_AbstractIterator.descr__length_hint__),
+)
+
+
+class W_OwnPropertiesIterator(W_AbstractIterator):
+    """Iterator over the own properties of an object."""
+
+    def _gather_keys(self, h_iteratee, ll_callback, dataptr):
+        res = support.emjs_iter_own(h_iteratee, ll_callback, dataptr)
+        _check_error(self.space, res)
+
+
+class W_AllPropertiesIterator(W_AbstractIterator):
+    """Iterator over all properties of an object."""
+
+    def _gather_keys(self, h_iteratee, ll_callback, dataptr):
+        res = support.emjs_iter_all(h_iteratee, ll_callback, dataptr)
+        _check_error(self.space, res)
+        
+
 class State:
     """State-holding class for additional app-level definitions.
 
@@ -660,7 +750,7 @@ class State:
 def getstate(space):
     """Get the (possibly cached) module state object."""
     return space.fromcache(State)
-    
+
 
 def _raise_error(space):
     """Helper function to raise an error if the js error flag is set."""
@@ -901,6 +991,13 @@ def uint32(space, w_value):
     with _unwrap_handle(space, w_value) as h_value:
         res = support.emjs_read_uint32(h_value)
     return space.wrap(res)
+
+
+def _make_callback(space, w_callback, wants_this, args):
+    callback = Callback(space, w_callback, wants_this, args)
+    dataptr = rffi.cast(rffi.VOIDP, callback.id)
+    ll_dispatch_callback = rffi.llhelper(support.CALLBACK_TP, dispatch_callback)
+    return support.emjs_make_callback(ll_dispatch_callback, dataptr), callback
 
 
 def _make_callback(space, w_callback, wants_this, args):
