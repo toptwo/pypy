@@ -471,7 +471,8 @@ class W_Object(W_Value):
     def descr__dir__(self, space):
         # This must return an actual list.
         # XXX TODO: a less gross way to obtain said list.
-        return space.wrap(W_AllPropertiesIterator(self, space).keys_w)
+        keys_w = W_AllPropertiesIterator(self, space).keys_w
+        return space.newlist(keys_w)
 
 
 def W_Object_descr__new__(space, w_subtype):
@@ -645,7 +646,6 @@ class W_AbstractIterator(W_Root):
         _gather_callback_self[0] = self
         with _unwrap_handle(space, w_iteratee) as h_iteratee:
             self._gather_keys(h_iteratee, ll_callback, dataptr)
-        print "GATEHRED", self.keys_w
         self.space = None
 
     def _gather_keys(self, h_iteratee, ll_callback, dataptr):
@@ -675,8 +675,10 @@ _gather_callback_self = [None]
 
 def _gather_callback(dataptr, h_item):
     iterator = _gather_callback_self[0]
-    iterator.keys_w.append(_wrap_handle(iterator.space, h_item))
-    return 0
+    if iterator is not None:
+        assert isinstance(iterator, W_AbstractIterator)
+        iterator.keys_w.append(_wrap_handle(iterator.space, h_item))
+    return rffi.cast(lltype.Signed, 0)
 
 
 W_AbstractIterator.typedef = TypeDef(
@@ -991,13 +993,6 @@ def uint32(space, w_value):
     with _unwrap_handle(space, w_value) as h_value:
         res = support.emjs_read_uint32(h_value)
     return space.wrap(res)
-
-
-def _make_callback(space, w_callback, wants_this, args):
-    callback = Callback(space, w_callback, wants_this, args)
-    dataptr = rffi.cast(rffi.VOIDP, callback.id)
-    ll_dispatch_callback = rffi.llhelper(support.CALLBACK_TP, dispatch_callback)
-    return support.emjs_make_callback(ll_dispatch_callback, dataptr), callback
 
 
 def _make_callback(space, w_callback, wants_this, args):
