@@ -117,3 +117,8 @@ class AppTestJS(object):
         assert obj["b"] == 2
         assert obj["c"] == 3
         assert obj["z"] == 9
+
+    def test_eval_operates_at_global_scope(self):
+        import js
+        js.eval("var x = 12")
+        assert js.globals.x == 12

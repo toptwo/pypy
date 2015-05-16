@@ -273,7 +273,10 @@ var LibraryEMJS = {
   emjs_eval: function(expr_ptr) {
     try {
       var expr = Pointer_stringify(expr_ptr);
-      var value = eval(expr);
+      // Force eval() to execute at global scope.
+      // See http://perfectionkills.com/global-eval-what-are-the-options/
+      // for discussion, and extra workaround me might like to add.
+      var value = (1,eval)(expr);
       return _emjs_make_handle(value);
     } catch (err) { EMJS.last_error = err; return EMJS.ERROR; }
   },
