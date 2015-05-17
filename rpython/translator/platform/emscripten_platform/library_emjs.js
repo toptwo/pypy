@@ -346,9 +346,8 @@ var LibraryEMJS = {
       var obj = _emjs_deref(obj_h);
       for (var prop in obj) {
         var prop_h = _emjs_make_handle(prop);
-        var doBreak = Runtime.dynCall("iii", fnptr, [dataptr, prop_h]);
+        Runtime.dynCall("vii", fnptr, [dataptr, prop_h]);
         _emjs_free(prop_h);
-        if (doBreak) { break; }
       }
       return EMJS.OK
     } catch (err) { EMJS.last_error = err; return EMJS.ERROR; }
@@ -361,9 +360,8 @@ var LibraryEMJS = {
       for (var prop in obj) {
         if (!obj.hasOwnProperty(prop)) { continue; }
         var prop_h = _emjs_make_handle(prop);
-        var doBreak = Runtime.dynCall("iii", fnptr, [dataptr, prop_h]);
+        Runtime.dynCall("vii", fnptr, [dataptr, prop_h]);
         _emjs_free(prop_h);
-        if (doBreak) { break; }
       }
       return EMJS.OK
     } catch (err) { EMJS.last_error = err; return EMJS.ERROR; }

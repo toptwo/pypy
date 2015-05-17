@@ -56,6 +56,7 @@ SIZE_T_TP = cConfig.size_t
 EMJS_HANDLE_TP = cConfig.emjs_handle
 EMJS_TYPE_TP = cConfig.emjs_type
 CALLBACK_TP = rffi.CCallback([rffi.VOIDP, EMJS_HANDLE_TP], EMJS_HANDLE_TP)
+CALLBACK_V_TP = rffi.CCallback([rffi.VOIDP, EMJS_HANDLE_TP], lltype.Void)
 
 
 # This will on-demand load the javascript library for the implementation
@@ -110,7 +111,7 @@ def load_javascript_ctx():
         class Runtime:
 
             def dynCall(self, callsig, fnptr, args):
-                assert callsig == "iii"
+                assert callsig == "iii" or callsig == "vii"
                 return fnptr(*args)
 
     
@@ -351,12 +352,12 @@ def emjs_typeof(h):
     raise NotImplementedError
 
 
-@jsexternal([EMJS_HANDLE_TP, CALLBACK_TP, rffi.VOIDP], EMJS_HANDLE_TP)
+@jsexternal([EMJS_HANDLE_TP, CALLBACK_V_TP, rffi.VOIDP], EMJS_HANDLE_TP)
 def emjs_iter_all(h_obj, callback, data):
     raise NotImplementedError
 
 
-@jsexternal([EMJS_HANDLE_TP, CALLBACK_TP, rffi.VOIDP], EMJS_HANDLE_TP)
+@jsexternal([EMJS_HANDLE_TP, CALLBACK_V_TP, rffi.VOIDP], EMJS_HANDLE_TP)
 def emjs_iter_own(h_obj, callback, data):
     raise NotImplementedError
                          

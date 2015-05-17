@@ -1,6 +1,8 @@
 
 from __future__ import with_statement
 
+import os
+
 from rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.rlib import rweakref
 from rpython.rlib.objectmodel import we_are_translated
@@ -641,11 +643,14 @@ class W_AbstractIterator(W_Root):
         self.space = space
         self.keys_w = []
         self.idx = -1
-        ll_callback = rffi.llhelper(support.CALLBACK_TP, _gather_callback)
+        ll_callback = rffi.llhelper(support.CALLBACK_V_TP, _gather_callback)
         dataptr = rffi.cast(rffi.VOIDP, 0)
-        _gather_callback_self[0] = self
-        with _unwrap_handle(space, w_iteratee) as h_iteratee:
-            self._gather_keys(h_iteratee, ll_callback, dataptr)
+        _gather_callback_self.instance = self
+        try:
+            with _unwrap_handle(space, w_iteratee) as h_iteratee:
+                self._gather_keys(h_iteratee, ll_callback, dataptr)
+        finally:
+            _gather_callback_self.instance = None
         self.space = None
 
     def _gather_keys(self, h_iteratee, ll_callback, dataptr):
@@ -671,14 +676,22 @@ class W_AbstractIterator(W_Root):
 # For now, we just set it in a global variable, bleh.
 # It works because the keys are gathered via a synchronous call.
 
-_gather_callback_self = [None]
+class _GatherCallbackSelf(object):
+    def __init__(self):
+        self.instance = None
+
+_gather_callback_self = _GatherCallbackSelf()
 
 def _gather_callback(dataptr, h_item):
-    iterator = _gather_callback_self[0]
+    iterator = _gather_callback_self.instance
     if iterator is not None:
         assert isinstance(iterator, W_AbstractIterator)
-        iterator.keys_w.append(_wrap_handle(iterator.space, h_item))
-    return rffi.cast(lltype.Signed, 0)
+        w_item = _wrap_handle(iterator.space, support.emjs_dup(h_item))
+        iterator.keys_w.append(w_item)
+    else:
+        os.write(2, "no active iterator\n")
+        raise RuntimeError("no active iterator")
+    #return rffi.cast(lltype.Signed, 0)
 
 
 W_AbstractIterator.typedef = TypeDef(

@@ -131,8 +131,8 @@ emjs_type emjs_typeof(emjs_handle);
 //  
 // XXX TODO: It would be nice to use generators to do a pull-based approach
 // here, with an API closer to C++-style iterators...
-emjs_handle emjs_iter_all(emjs_handle obj, int (*fun)(void*,emjs_handle), void*);
-emjs_handle emjs_iter_own(emjs_handle obj, int (*fun)(void*,emjs_handle), void*);
+emjs_handle emjs_iter_all(emjs_handle obj, void (*fun)(void*,emjs_handle), void*);
+emjs_handle emjs_iter_own(emjs_handle obj, void (*fun)(void*,emjs_handle), void*);
 
 // Check the truthinesss of a JS value.
 int emjs_check(emjs_handle value);
