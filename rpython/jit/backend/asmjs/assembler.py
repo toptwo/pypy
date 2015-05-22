@@ -1187,7 +1187,6 @@ class CompiledBlockASMJS(object):
         assert isinstance(box, Box)
         assert box not in self.box_variables
         if boxvar is not None:
-            assert boxvar in self.box_variable_refcounts
             self.box_variable_refcounts[boxvar] += 1
         else:
             if box.type == FLOAT:
@@ -1204,7 +1203,8 @@ class CompiledBlockASMJS(object):
         boxvar = self.box_variables.get(box, None)
         if boxvar is None:
             boxexpr = self._get_jsval(box)
-            if isinstance(boxexpr, js.Variable):
+            # If it points to some other box, re-use the variable directly.
+            if isinstance(boxexpr, js.Variable) and boxexpr in self.box_variable_refcounts:
                 self._allocate_box_variable(box, boxexpr)
             else:
                 self.bldr.emit_comment("FLUSH SUSPENDED BOX")
