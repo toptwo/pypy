@@ -1151,7 +1151,6 @@ class CompiledBlockASMJS(object):
         return True
 
     def _suspend_box_expression(self, box, expr):
-        #print "SUSPENDING BOX", box, "; EXPR =", expr
         if SANITYCHECK:
             assert box not in self.box_variables
             assert box not in self.box_expressions
@@ -1184,26 +1183,33 @@ class CompiledBlockASMJS(object):
             return None
         return jitval
 
-    def _allocate_box_variable(self, box):
+    def _allocate_box_variable(self, box, boxvar=None):
         assert isinstance(box, Box)
         assert box not in self.box_variables
-        if box.type == FLOAT:
-            boxvar = self.bldr.allocate_doublevar()
+        if boxvar is not None:
+            assert boxvar in self.box_variable_refcounts
+            self.box_variable_refcounts[boxvar] += 1
         else:
-            boxvar = self.bldr.allocate_intvar()
+            if box.type == FLOAT:
+                boxvar = self.bldr.allocate_doublevar()
+            else:
+                boxvar = self.bldr.allocate_intvar()
+            self.box_variable_refcounts[boxvar] = 1
         self.box_variables[box] = boxvar
-        self.box_variable_refcounts[boxvar] = 1
         return boxvar
 
     def _genop_flush_box(self, box):
         if not isinstance(box, Box):
-            return box
+            return self._get_jsval(box)
         boxvar = self.box_variables.get(box, None)
         if boxvar is None:
             boxexpr = self._get_jsval(box)
-            self.bldr.emit_comment("FLUSH SUSPENDED BOX")
-            boxvar = self._allocate_box_variable(box)
-            self.bldr.emit_assignment(boxvar, boxexpr)
+            if isinstance(boxexpr, js.Variable):
+                self._allocate_box_variable(box, boxexpr)
+            else:
+                self.bldr.emit_comment("FLUSH SUSPENDED BOX")
+                boxvar = self._allocate_box_variable(box)
+                self.bldr.emit_assignment(boxvar, boxexpr)
         return boxvar
 
     def _is_final_use(self, box, i):
@@ -1335,10 +1341,7 @@ class CompiledBlockASMJS(object):
             self.spilled_frame_offset = offset + typ.size
         # Generate code to write the value into the frame.
         addr = js.FrameSlotAddr(offset)
-        if isinstance(box, Box):
-            boxexpr = self._genop_flush_box(box)
-        else:
-            boxexpr = self._get_jsval(box)
+        boxexpr = self._genop_flush_box(box)
         self.bldr.emit_store(boxexpr, addr, typ)
         # Record where we spilled it.
         if box not in self.spilled_frame_locations:
@@ -1702,10 +1705,8 @@ class CompiledBlockASMJS(object):
 
     def genop_int_force_ge_zero(self, op):
         argbox = op.getarg(0)
+        self._genop_flush_box(argbox)
         arg = self._get_jsval(argbox)
-        if isinstance(argbox, Box):
-            if not isinstance(arg, js.Variable):
-                arg = self._genop_flush_box(argbox)
         resvar = self._allocate_box_variable(op.result)
         with self.bldr.emit_if_block(js.LessThan(arg, js.zero)):
             self.bldr.emit_assignment(resvar, js.zero)
@@ -1753,10 +1754,7 @@ class CompiledBlockASMJS(object):
 
     def genop_float_abs(self, op):
         argbox = op.getarg(0)
-        arg = self._get_jsval(argbox)
-        if isinstance(argbox, Box):
-            if not isinstance(arg, js.Variable):
-                arg = self._genop_flush_box(argbox)
+        arg = self._genop_flush_box(argbox)
         resvar = self._allocate_box_variable(op.result)
         zero = js.ConstFloat(longlong.getfloatstorage(0.0))
         with self.bldr.emit_if_block(js.LessThan(arg, zero)):
@@ -2420,10 +2418,7 @@ class CompiledBlockASMJS(object):
 
     def _genop_malloc_nursery(self, op, sizebox):
         gc_ll_descr = self.cpu.gc_ll_descr
-        sizevar = self._get_jsval(sizebox)
-        if isinstance(sizebox, Box):
-            if not isinstance(sizevar, js.Variable):
-                sizevar = self._genop_flush_box(sizebox)
+        sizevar = self._genop_flush_box(sizebox)
         sizevar = self._emit_round_up_for_allocation(sizevar)
         # This is essentially an in-lining of MiniMark.malloc_fixedsize_clear()
         nfree_addr = js.ConstInt(gc_ll_descr.get_nursery_free_addr())
