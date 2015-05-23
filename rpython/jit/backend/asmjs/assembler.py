@@ -1884,7 +1884,10 @@ class CompiledBlockASMJS(object):
                 self.bldr.emit_expr(js.DynCallFunc("v", release_addr, []))
                 # If necessary, restore our local copy into the real 'errno'.
                 if save_err & rffi.RFFI_READSAVED_ERRNO:
-                    rpy_errno_ofs = llerrno.get_rpy_errno_offset(self.cpu)
+                    if save_err & rffi.RFFI_ALT_ERRNO:
+                        rpy_errno_ofs = llerrno.get_alt_errno_offset(self.cpu)
+                    else:
+                        rpy_errno_ofs = llerrno.get_rpy_errno_offset(self.cpu)
                     p_errno_ofs = llerrno.get_p_errno_offset(self.cpu)
                     errno = js.HeapData(
                         js.Int32,
@@ -1907,8 +1910,10 @@ class CompiledBlockASMJS(object):
                 self._genop_call(op, descr, fnaddr, args)
                 # If necessary, read the real 'errno' and save a local copy.
                 if save_err & rffi.RFFI_SAVE_ERRNO:
-                    # XXX TODO:  will this all "just work" when translated?
-                    rpy_errno_ofs = llerrno.get_rpy_errno_offset(self.cpu)
+                    if save_err & rffi.RFFI_ALT_ERRNO:
+                        rpy_errno_ofs = llerrno.get_alt_errno_offset(self.cpu)
+                    else:
+                        rpy_errno_ofs = llerrno.get_rpy_errno_offset(self.cpu)
                     p_errno_ofs = llerrno.get_p_errno_offset(self.cpu)
                     errno = js.HeapData(
                         js.Int32,
