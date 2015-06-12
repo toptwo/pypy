@@ -1,4 +1,4 @@
-import py, os
+import py, os ,sys
 import itertools
 
 from rpython.translator.platform.posix import BasePosix, rpydir, GnuMakefile
@@ -12,7 +12,10 @@ def find_executable(filename, environ=None):
     """Find an executable by searching the current $PATH."""
     if environ is None:
         environ = os.environ
-    path = environ.get("PATH", "/usr/local/bin:/usr/bin:/bin").split(":")
+    if sys.platform == 'win32':
+        path = environ.get("PATH", "C:¥Windows¥system32;C:¥Windows¥;C:¥Windows¥System32¥Wbem;C:¥Windows¥System32¥WindowsPowerShell¥v1.0¥").split(";")
+    else:
+        path = environ.get("PATH", "/usr/local/bin:/usr/bin:/bin").split(":")
     for dirpath in path:
         dirpath = os.path.abspath(dirpath.strip())
         filepath = os.path.normpath(os.path.join(dirpath, filename))
@@ -25,7 +28,10 @@ def find_javascript_shell():
     """Find an executable javascript shell."""
     jsshell = find_executable("js")
     if jsshell is None:
-        jsshell = find_executable("node")
+        if sys.platform == 'win32':
+            jsshell = find_executable("node.exe")
+        else:
+            jsshell = find_executable("node")
         if jsshell is None:
             raise RuntimeError("Could not find javascript shell")
     return jsshell
@@ -87,6 +93,7 @@ class EmscriptenPlatform(BasePosix):
       #"-s", "ASSERTIONS=1",
       #"-s", "SAFE_HEAP=1",
     ]
+    
 
     cflags = list(emcc_flags) + \
              [f.strip() for f in os.environ.get("CFLAGS", "").split()] + \
