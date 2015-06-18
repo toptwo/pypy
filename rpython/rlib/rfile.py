@@ -13,7 +13,7 @@ from rpython.rtyper.tool import rffi_platform as platform
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
 includes = ['stdio.h', 'sys/types.h']
-if os.name == "posix":
+if os.name == "posix" or os.name == 'emsfans_nt':
     includes += ['unistd.h']
     ftruncate = 'ftruncate'
     fileno = 'fileno'

@@ -44,7 +44,7 @@ except ImportError:
             pass
 rlock = RLock()
 
-_POSIX = os.name == "posix"
+_POSIX = os.name == "posix" or "emsfans_nt"
 _MS_WINDOWS = os.name == "nt"
 _64BIT = "64bit" in host_platform.architecture()[0]
 

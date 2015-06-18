@@ -19,7 +19,7 @@ import os
 import platform
 import stat
 
-_POSIX = os.name == "posix"
+_POSIX = os.name == "posix" or "emsfans_nt"
 _MS_WINDOWS = os.name == "nt"
 _64BIT = "64bit" in platform.architecture()[0]
 _CYGWIN = "cygwin" == sys.platform

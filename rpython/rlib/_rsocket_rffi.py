@@ -8,7 +8,7 @@ from rpython.translator.platform import platform as target_platform
 from rpython.rlib.rarithmetic import intmask, r_uint
 import os,sys
 
-_POSIX = os.name == "posix"
+_POSIX = os.name == "posix" or "emsfans_nt"
 _WIN32 = sys.platform == "win32"
 _MSVC  = target_platform.name == "msvc"
 _MINGW = target_platform.name == "mingw32"

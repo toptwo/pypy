@@ -92,7 +92,10 @@ def registering_str_unicode(posixfunc, condition=True):
         return decorated
     return decorator
 
-posix = __import__(os.name)
+if os.name == 'emsfans_nt':
+    posix = __import__('nt')
+else:
+    posix = __import__(os.name)
 
 includes = []
 if not _WIN32:

@@ -443,7 +443,7 @@ else:
     # them immediately.
     clear_large_memory_chunk = llmemory.raw_memclear
 
-if os.name == "posix":
+if os.name == "posix" or 'emsfans_nt':
     from rpython.translator.tool.cbuild import ExternalCompilationInfo
     _eci = ExternalCompilationInfo(includes=['sys/mman.h'])
     raw_mprotect = rffi.llexternal('mprotect',

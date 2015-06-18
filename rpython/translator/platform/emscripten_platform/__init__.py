@@ -12,7 +12,7 @@ def find_executable(filename, environ=None):
     """Find an executable by searching the current $PATH."""
     if environ is None:
         environ = os.environ
-    if sys.platform == 'win32':
+    if sys.platform == 'win32' or sys.platform == 'emsfans_win32':
         path = environ.get("PATH", "C:¥Windows¥system32;C:¥Windows¥;C:¥Windows¥System32¥Wbem;C:¥Windows¥System32¥WindowsPowerShell¥v1.0¥").split(";")
     else:
         path = environ.get("PATH", "/usr/local/bin:/usr/bin:/bin").split(":")
@@ -28,7 +28,7 @@ def find_javascript_shell():
     """Find an executable javascript shell."""
     jsshell = find_executable("js")
     if jsshell is None:
-        if sys.platform == 'win32':
+        if sys.platform == 'win32' or sys.platform == 'emsfans_win32':
             jsshell = find_executable("node.exe")
         else:
             jsshell = find_executable("nodejs")
@@ -122,6 +122,10 @@ class EmscriptenPlatform(BasePosix):
  
     def __init__(self, *args, **kwds):
         os.environ.update(self.extra_environ)
+        if sys.platform == 'win32' and not os.environ.get('CC',''):
+            os.environ['CC'] = 'emcc'
+            sys.platform = 'emsfans_win32'
+            os.name = 'emsfans_nt'
         super(EmscriptenPlatform, self).__init__(*args, **kwds)
 
     def execute(self, executable, args=None, env=None, *a, **k):
@@ -221,6 +225,8 @@ class EmscriptenPlatform(BasePosix):
         return m 
 
     def execute_makefile(self, path_to_makefile, extra_opts=[]):
+        if sys.platform == 'win32' or sys.platform == 'emsfans_win32':
+            self.make_cmd = 'mingw32-make.exe'
         if isinstance(path_to_makefile, GnuMakefile):
             path = path_to_makefile.makefile_dir
         else:

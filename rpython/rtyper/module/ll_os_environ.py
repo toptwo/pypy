@@ -198,7 +198,12 @@ def r_unsetenv(name):
     # default implementation for platforms without a real unsetenv()
     r_putenv(name, '')
 
-if hasattr(__import__(os.name), 'unsetenv'):
+if os.name == 'emsfans_nt':
+    posix = __import__('nt')
+else:
+    posix = __import__(os.name)
+
+if hasattr(posix, 'unsetenv'):
     os_unsetenv = rffi.llexternal('unsetenv', [rffi.CCHARP], rffi.INT,
                                   save_err=rffi.RFFI_SAVE_ERRNO)
 
