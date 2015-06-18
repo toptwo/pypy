@@ -31,7 +31,9 @@ def find_javascript_shell():
         if sys.platform == 'win32':
             jsshell = find_executable("node.exe")
         else:
-            jsshell = find_executable("node")
+            jsshell = find_executable("nodejs")
+            if jsshell is None:
+                jsshell = find_executable("node")
         if jsshell is None:
             raise RuntimeError("Could not find javascript shell")
     return jsshell

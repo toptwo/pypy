@@ -17,7 +17,7 @@ def _get_compiler_type(cc, x64_flag):
         return MsvcPlatform(x64=x64_flag)
     elif cc.startswith('mingw') or cc == 'gcc':
         return MingwPlatform(cc)
-    elif cc.startswith('emcc') or cc.startswith('em++') or cc.startswith('clang'):
+    elif cc.startswith('emcc') or cc.startswith('clang'):
         return MingwPlatform(cc)
     else:
         return MsvcPlatform(cc=cc, x64=x64_flag)
